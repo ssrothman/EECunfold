@@ -1,0 +1,4 @@
+*.o
+main
+main_optim
+unfolded.npy
