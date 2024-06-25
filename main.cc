@@ -51,10 +51,9 @@ size_t lookup_index_vec(
         dR * dR_multiplier;
 }
 
-template <typename S>
-Eigen::VectorXd solve(const Eigen::MatrixXd& transfer,
-                      const Eigen::VectorXd& reco,
-                      const Eigen::VectorXd& gen){
+template <typename S, typename T>
+T solve(const Eigen::MatrixXd& transfer,
+                      const T& reco){
     std::cout << typeid(S).name() << ":" << std::endl;
 
     auto start = high_resolution_clock::now();
@@ -67,12 +66,14 @@ Eigen::VectorXd solve(const Eigen::MatrixXd& transfer,
     } else {
         solver.compute(transfer);
     }
-    Eigen::VectorXd unfolded = solver.solve(reco);
+    T unfolded = solver.solve(reco);
+
+    T forwarded = transfer * unfolded;
 
     auto stop = high_resolution_clock::now();
     auto duration = duration_cast<milliseconds>(stop-start);
 
-    printf("\tdiff: %g\n",(unfolded - gen).norm());
+    printf("\tdiff: %g\n",(forwarded - reco).norm());
     printf("\ttime: %lu\n", duration.count());
     return unfolded;
 }
@@ -152,11 +153,11 @@ int main(){
 
     //now we can plug these into eigen
 
-    Eigen::Map<Eigen::VectorXd> reco_eigen(reco.data.data(), reco_size);
-    Eigen::Map<Eigen::MatrixXd> covreco_eigen(covreco.data.data(), covreco_shape.first, covreco_shape.second);
-    Eigen::Map<Eigen::VectorXd> gen_eigen(gen.data.data(), gen_size);
-    Eigen::Map<Eigen::MatrixXd> covgen_eigen(covgen.data.data(), covgen_shape.first, covgen_shape.second);
-    Eigen::Map<Eigen::MatrixXd> transfer_eigen(transfer_expanded.data(), reco_size, gen_size);
+    Eigen::VectorXd reco_eigen = Eigen::Map<Eigen::VectorXd> (reco.data.data(), reco_size);
+    Eigen::MatrixXd covreco_eigen = Eigen::Map<Eigen::MatrixXd>(covreco.data.data(), covreco_shape.first, covreco_shape.second);
+    Eigen::VectorXd gen_eigen = Eigen::Map<Eigen::VectorXd>(gen.data.data(), gen_size);
+    Eigen::MatrixXd covgen_eigen = Eigen::Map<Eigen::MatrixXd>(covgen.data.data(), covgen_shape.first, covgen_shape.second);
+    Eigen::MatrixXd transfer_eigen = Eigen::Map<Eigen::MatrixXd>(transfer_expanded.data(), reco_size, gen_size);
 
     //oops its backwards
     transfer_eigen.transposeInPlace();
@@ -202,70 +203,101 @@ int main(){
     Eigen::VectorXd diff = reco_eigen - forward;
     printf("forward diff: %f\n\n", diff.norm());
 
-
-
-
     Eigen::MatrixXd thecov = covreco_eigen;
     //Eigen::MatrixXd thecov = Eigen::MatrixXd::Identity(reco_size, reco_size);
 
-    Eigen::LDLT<Eigen::MatrixXd> llt(thecov);
-    Eigen::MatrixXd L = Eigen::MatrixXd::Identity(reco_size, reco_size) 
-        * llt.transpositionsP() * llt.matrixL();
-    Eigen::VectorXd D = llt.vectorD().real();
-    Eigen::MatrixXd check = L * D.asDiagonal() * L.transpose();
-
-    std::cout << (covreco_eigen - check).norm() << std::endl;
-
-    Eigen::VectorXd Ds = D.cwiseSqrt();
-    Eigen::VectorXd Di = D.cwiseSqrt().cwiseInverse();
-    
-    constexpr double threshold = 1e10;
-    Eigen::VectorXd Di0 = Di;
-    for (int i=0; i<Di.size(); ++i){
-        if (!std::isfinite(Di(i)) || Di(i) > threshold){
-            Di0(i) = 0;
-        }
-    }
-
-    Eigen::MatrixXd printmat(D.size(), 4);
-    printmat << D, Ds, Di, Di0;
-
-    Eigen::MatrixXd G = L * Di0.asDiagonal();
-
-    std::cout << printmat << std::endl;
-
-    Eigen::VectorXd Greco = G*reco_eigen;
-    Eigen::MatrixXd Gtransfer = G*transfer_over_gen;
+    Eigen::LLT<Eigen::MatrixXd> llt(thecov);
+    Eigen::MatrixXd L = llt.matrixL();
 
     /*solve<Eigen::PartialPivLU<Eigen::MatrixXd>>(
-            Gtransfer, Greco, gen_eigen);*/
+            L, reco_eigen);
+    
+    solve<Eigen::PartialPivLU<Eigen::MatrixXd>>(
+            L, transfer_over_gen);
 
     solve<Eigen::FullPivLU<Eigen::MatrixXd>>(
-            Gtransfer, Greco, gen_eigen);
+            L, reco_eigen);
+    
+    solve<Eigen::FullPivLU<Eigen::MatrixXd>>(
+            L, transfer_over_gen);
 
-    /*solve<Eigen::HouseholderQR<Eigen::MatrixXd>>(
-            Gtransfer, Greco, gen_eigen);*/
+    solve<Eigen::HouseholderQR<Eigen::MatrixXd>>(
+            L, reco_eigen);
+    
+    solve<Eigen::HouseholderQR<Eigen::MatrixXd>>(
+            L, transfer_over_gen);
 
     solve<Eigen::ColPivHouseholderQR<Eigen::MatrixXd>>(
-            Gtransfer, Greco, gen_eigen);
+            L, reco_eigen);
+    
+    solve<Eigen::ColPivHouseholderQR<Eigen::MatrixXd>>(
+            L, transfer_over_gen);
 
     solve<Eigen::FullPivHouseholderQR<Eigen::MatrixXd>>(
-            Gtransfer, Greco, gen_eigen);
+            L, reco_eigen);
+    
+    solve<Eigen::FullPivHouseholderQR<Eigen::MatrixXd>>(
+            L, transfer_over_gen);
 
-    Eigen::VectorXd unf = solve<Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd>>(
-            Gtransfer, Greco, gen_eigen);
+    solve<Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd>>(
+            L, reco_eigen);
+    
+    solve<Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd>>(
+            L, transfer_over_gen);
 
-    /*solve<Eigen::LLT<Eigen::MatrixXd>>(
-            Gtransfer, Greco, gen_eigen);*/
+    solve<Eigen::LLT<Eigen::MatrixXd>>(
+            L, reco_eigen);
+    
+    solve<Eigen::LLT<Eigen::MatrixXd>>(
+            L, transfer_over_gen);
 
-    /*solve<Eigen::LDLT<Eigen::MatrixXd>>(
-            Gtransfer, Greco, gen_eigen);*/
+    solve<Eigen::LDLT<Eigen::MatrixXd>>(
+            L, reco_eigen);
+    
+    solve<Eigen::LDLT<Eigen::MatrixXd>>(
+            L, transfer_over_gen);
 
     solve<Eigen::BDCSVD<Eigen::MatrixXd>>(
-            Gtransfer, Greco, gen_eigen);
+            L, reco_eigen);
+    
+    solve<Eigen::BDCSVD<Eigen::MatrixXd>>(
+            L, transfer_over_gen);
+
+    return 0;*/
+    
+    Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd> cod(L);
+    Eigen::VectorXd Greco = cod.solve(reco_eigen);
+    Eigen::MatrixXd Gtransfer = cod.solve(transfer_over_gen);
+
+    /*solve<Eigen::PartialPivLU<Eigen::MatrixXd>>(
+            Gtransfer, Greco);*/
+
+    solve<Eigen::FullPivLU<Eigen::MatrixXd>>(
+            Gtransfer, Greco);
+
+    /*solve<Eigen::HouseholderQR<Eigen::MatrixXd>>(
+            Gtransfer, Greco);*/
+
+    solve<Eigen::ColPivHouseholderQR<Eigen::MatrixXd>>(
+            Gtransfer, Greco);
+
+    solve<Eigen::FullPivHouseholderQR<Eigen::MatrixXd>>(
+            Gtransfer, Greco);
+
+    Eigen::VectorXd unf = solve<Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd>>(
+            Gtransfer, Greco);
+
+    /*solve<Eigen::LLT<Eigen::MatrixXd>>(
+            Gtransfer, Greco);*/
+
+    /*solve<Eigen::LDLT<Eigen::MatrixXd>>(
+            Gtransfer, Greco);*/
+
+    solve<Eigen::BDCSVD<Eigen::MatrixXd>>(
+            Gtransfer, Greco);
 
     solve<Eigen::JacobiSVD<Eigen::MatrixXd>>(
-            Gtransfer, Greco, gen_eigen);
+            Gtransfer, Greco);
 
     //std::cout << unfold-gen_eigen << std::endl;
     //
