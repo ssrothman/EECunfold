@@ -208,100 +208,25 @@ int main(){
 
     Eigen::LLT<Eigen::MatrixXd> llt(thecov);
     Eigen::MatrixXd L = llt.matrixL();
-
-    /*solve<Eigen::PartialPivLU<Eigen::MatrixXd>>(
-            L, reco_eigen);
     
-    solve<Eigen::PartialPivLU<Eigen::MatrixXd>>(
-            L, transfer_over_gen);
+    Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd> codL(L);
+    Eigen::VectorXd Greco = codL.solve(reco_eigen);
+    Eigen::MatrixXd Gtransfer = codL.solve(transfer_over_gen);
 
-    solve<Eigen::FullPivLU<Eigen::MatrixXd>>(
-            L, reco_eigen);
-    
-    solve<Eigen::FullPivLU<Eigen::MatrixXd>>(
-            L, transfer_over_gen);
+    Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd> codGtransfer(Gtransfer);
+    Eigen::VectorXd unfolded = codGtransfer.solve(Greco);
 
-    solve<Eigen::HouseholderQR<Eigen::MatrixXd>>(
-            L, reco_eigen);
-    
-    solve<Eigen::HouseholderQR<Eigen::MatrixXd>>(
-            L, transfer_over_gen);
+    printf("unfold diff: %g\n", (unfolded-gen_eigen).norm());
 
-    solve<Eigen::ColPivHouseholderQR<Eigen::MatrixXd>>(
-            L, reco_eigen);
-    
-    solve<Eigen::ColPivHouseholderQR<Eigen::MatrixXd>>(
-            L, transfer_over_gen);
+    Eigen::MatrixXd GtransferGtransfer = Gtransfer.transpose() * Gtransfer;
+    Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd> codGtransferGtransfer(GtransferGtransfer);
+    Eigen::MatrixXd GtransferGtransferInv = codGtransferGtransfer.pseudoInverse();
+    Eigen::MatrixXd GtransferGtransferInv2 = codGtransferGtransfer.solve(Eigen::MatrixXd::Identity(reco_size, reco_size));
 
-    solve<Eigen::FullPivHouseholderQR<Eigen::MatrixXd>>(
-            L, reco_eigen);
-    
-    solve<Eigen::FullPivHouseholderQR<Eigen::MatrixXd>>(
-            L, transfer_over_gen);
+    printf("Gtransfer inv diff: %g\n", (GtransferGtransferInv - GtransferGtransferInv2).norm());
 
-    solve<Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd>>(
-            L, reco_eigen);
-    
-    solve<Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd>>(
-            L, transfer_over_gen);
-
-    solve<Eigen::LLT<Eigen::MatrixXd>>(
-            L, reco_eigen);
-    
-    solve<Eigen::LLT<Eigen::MatrixXd>>(
-            L, transfer_over_gen);
-
-    solve<Eigen::LDLT<Eigen::MatrixXd>>(
-            L, reco_eigen);
-    
-    solve<Eigen::LDLT<Eigen::MatrixXd>>(
-            L, transfer_over_gen);
-
-    solve<Eigen::BDCSVD<Eigen::MatrixXd>>(
-            L, reco_eigen);
-    
-    solve<Eigen::BDCSVD<Eigen::MatrixXd>>(
-            L, transfer_over_gen);
-
-    return 0;*/
-    
-    Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd> cod(L);
-    Eigen::VectorXd Greco = cod.solve(reco_eigen);
-    Eigen::MatrixXd Gtransfer = cod.solve(transfer_over_gen);
-
-    /*solve<Eigen::PartialPivLU<Eigen::MatrixXd>>(
-            Gtransfer, Greco);*/
-
-    solve<Eigen::FullPivLU<Eigen::MatrixXd>>(
-            Gtransfer, Greco);
-
-    /*solve<Eigen::HouseholderQR<Eigen::MatrixXd>>(
-            Gtransfer, Greco);*/
-
-    solve<Eigen::ColPivHouseholderQR<Eigen::MatrixXd>>(
-            Gtransfer, Greco);
-
-    solve<Eigen::FullPivHouseholderQR<Eigen::MatrixXd>>(
-            Gtransfer, Greco);
-
-    Eigen::VectorXd unf = solve<Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd>>(
-            Gtransfer, Greco);
-
-    /*solve<Eigen::LLT<Eigen::MatrixXd>>(
-            Gtransfer, Greco);*/
-
-    /*solve<Eigen::LDLT<Eigen::MatrixXd>>(
-            Gtransfer, Greco);*/
-
-    solve<Eigen::BDCSVD<Eigen::MatrixXd>>(
-            Gtransfer, Greco);
-
-    solve<Eigen::JacobiSVD<Eigen::MatrixXd>>(
-            Gtransfer, Greco);
-
-    //std::cout << unfold-gen_eigen << std::endl;
-    //
-    std::vector<double> unfvec(unf.reshaped().begin(), unf.reshaped().end());
+    std::vector<double> unfvec(unfolded.reshaped().begin(), 
+                               unfolded.reshaped().end());
 
     npy::npy_data<double> unfnpy; 
     unfnpy.data = unfvec;
@@ -309,6 +234,16 @@ int main(){
     unfnpy.fortran_order = false;
 
     npy::write_npy("unfolded.npy", unfnpy);
+
+    std::vector<double> covunfvec(GtransferGtransferInv.reshaped().begin(), 
+                                  GtransferGtransferInv.reshaped().end());
+
+    npy::npy_data<double> covunfnpy;
+    covunfnpy.data = covunfvec;
+    covunfnpy.shape = covgen.shape;
+    covunfnpy.fortran_order = false;
+
+    npy::write_npy("covunfolded.npy", covunfnpy);
 
     return 0;
 }
