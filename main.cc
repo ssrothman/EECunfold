@@ -8,47 +8,187 @@
 #include <chrono>
 using namespace std::chrono;
 
+#include "CLI11/include/CLI/CLI.hpp"
+
 #define EIGEN_USE_BLAS 
 #define EIGEN_USE_LAPACKE
 
 #include <Eigen/Dense>
 #include <Eigen/Cholesky>
 
-size_t lookup_index_transfer(
-        const npy::npy_data<double>& transfer,
-        size_t order, 
-        size_t btag_reco, size_t pt_reco, size_t dR_reco,
-        size_t btag_gen, size_t pt_gen, size_t dR_gen){
-    const size_t order_multiplier = transfer.shape[1] * transfer.shape[2] * transfer.shape[3] * transfer.shape[4] * transfer.shape[5] * transfer.shape[6];
-    const size_t btag_reco_multiplier = transfer.shape[2] * transfer.shape[3] * transfer.shape[4] * transfer.shape[5] * transfer.shape[6];
-    const size_t pt_reco_multiplier = transfer.shape[3] * transfer.shape[4] * transfer.shape[5] * transfer.shape[6];
-    const size_t dR_reco_multiplier = transfer.shape[4] * transfer.shape[5] * transfer.shape[6];
-    const size_t btag_gen_multiplier = transfer.shape[5] * transfer.shape[6];
-    const size_t pt_gen_multiplier = transfer.shape[6];
-    const size_t dR_gen_multiplier = 1;
 
-    return order * order_multiplier +
-        btag_reco * btag_reco_multiplier +
-        pt_reco * pt_reco_multiplier +
-        dR_reco * dR_reco_multiplier +
-        btag_gen * btag_gen_multiplier +
-        pt_gen * pt_gen_multiplier +
-        dR_gen * dR_gen_multiplier;
+template <typename T>
+void dump_npy(const std::string fname,
+              const T& data,
+              const std::vector<size_t>& shape){
+    npy::npy_data<double> npydata;
+    npydata.data = std::vector<double>(data.reshaped().begin(),
+                                       data.reshaped().end());
+    npydata.shape = shape;
+    npydata.fortran_order = false;
+
+    npy::write_npy(fname, npydata);
 }
 
-size_t lookup_index_vec(
-        const npy::npy_data<double>& vec,
-        size_t order,
-        size_t btag, size_t pt, size_t dR){
-    const size_t order_multiplier = vec.shape[1] * vec.shape[2] * vec.shape[3];
-    const size_t btag_multiplier = vec.shape[2] * vec.shape[3];
-    const size_t pt_multiplier = vec.shape[3];
-    const size_t dR_multiplier = 1;
+void forwardfold(const Eigen::VectorXd& gen,
+                 const Eigen::MatrixXd& covgen,
+                 const Eigen::MatrixXd& transfer,
+                 Eigen::VectorXd& forwarded,
+                 Eigen::MatrixXd& covforwarded){
+    forwarded = transfer * gen;
+    covforwarded = transfer * covgen * transfer.transpose();
+}
 
-    return order * order_multiplier +
-        btag * btag_multiplier +
-        pt * pt_multiplier +
-        dR * dR_multiplier;
+void unfold(const Eigen::VectorXd& reco,
+            const Eigen::MatrixXd& covreco,
+            const Eigen::MatrixXd& transfer,
+            Eigen::VectorXd& unfolded,
+            Eigen::MatrixXd& covunfolded){
+    Eigen::LLT<Eigen::MatrixXd> llt(covreco);
+    Eigen::MatrixXd L = llt.matrixL();
+    
+    Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd> codL(L);
+    Eigen::VectorXd Lreco = codL.solve(reco);
+    Eigen::MatrixXd Ltransfer = codL.solve(transfer);
+
+    Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd> codLtransfer(Ltransfer);
+    unfolded = codLtransfer.solve(Lreco);
+
+    Eigen::MatrixXd LtransferLtransfer = Ltransfer.transpose() * Ltransfer;
+    Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd> codLtransferLtransfer(LtransferLtransfer);
+    covunfolded = codLtransferLtransfer.pseudoInverse();
+}
+
+void getGen(const std::string& folder,
+            Eigen::VectorXd& gen,
+            Eigen::MatrixXd& covgen,
+            size_t& gen_size,
+            std::vector<size_t>& gen_shape,
+            std::vector<size_t>& covgen_shape){
+    auto gen_npy = npy::read_npy<double>(folder + "/gen.npy");
+    auto covgen_npy = npy::read_npy<double>(folder + "/covgen.npy");
+
+    gen_size = gen_npy.data.size();
+    gen_shape = gen_npy.shape;
+    covgen_shape = covgen_npy.shape;
+
+    gen = Eigen::Map<Eigen::VectorXd>(gen_npy.data.data(), gen_size);
+    covgen = Eigen::Map<Eigen::MatrixXd>(covgen_npy.data.data(), gen_size, gen_size);
+
+    printf("Gen shape: %lu\n", gen_size);
+    printf("covgen shape: %lu %lu\n", covgen.rows(), covgen.cols());
+}
+
+void getReco(const std::string& folder,
+                Eigen::VectorXd& reco,
+                Eigen::MatrixXd& covreco,
+                size_t& reco_size,
+                std::vector<size_t>& reco_shape,
+                std::vector<size_t>& covreco_shape){
+    auto reco_npy = npy::read_npy<double>(folder + "/reco.npy");
+    auto covreco_npy = npy::read_npy<double>(folder + "/covreco.npy");
+
+    reco_size = reco_npy.data.size();
+    reco_shape = reco_npy.shape;
+    covreco_shape = covreco_npy.shape;
+
+    reco = Eigen::Map<Eigen::VectorXd>(reco_npy.data.data(), reco_size);
+    covreco = Eigen::Map<Eigen::MatrixXd>(covreco_npy.data.data(), reco_size, reco_size);
+
+    printf("Reco shape: %lu\n", reco_size);
+    printf("covreco shape: %lu %lu\n", covreco.rows(), covreco.cols());
+}
+
+void getTransfer(const std::string& folder,
+                 Eigen::MatrixXd& transfer){
+    auto reco_npy = npy::read_npy<double>(folder + "/reco.npy");
+    auto recopure_npy = npy::read_npy<double>(folder + "/recopure.npy");
+    auto gen_npy = npy::read_npy<double>(folder + "/gen.npy");
+    auto genpure_npy = npy::read_npy<double>(folder + "/genpure.npy");
+    auto transfer_npy = npy::read_npy<double>(folder + "/transfer.npy");
+
+    const size_t reco_size = reco_npy.data.size();
+    const size_t gen_size = gen_npy.data.size();
+
+    Eigen::VectorXd reco = Eigen::Map<Eigen::VectorXd>(reco_npy.data.data(), reco_size);
+    Eigen::VectorXd recopure = Eigen::Map<Eigen::VectorXd>(recopure_npy.data.data(), reco_size);
+
+    Eigen::VectorXd gen = Eigen::Map<Eigen::VectorXd>(gen_npy.data.data(), gen_size);
+    Eigen::VectorXd genpure = Eigen::Map<Eigen::VectorXd>(genpure_npy.data.data(), gen_size);
+
+    //step 1: expand order dimension in transfer matrix
+    size_t itransfer=0;
+    std::vector<double> transfer_expanded_vec;
+    transfer_expanded_vec.reserve(reco_size * gen_size);
+    for(unsigned order_gen=0; order_gen < gen_npy.shape[0]; ++order_gen){
+        for(unsigned btag_gen=0; btag_gen < gen_npy.shape[1]; ++btag_gen){
+            for(unsigned pt_gen=0; pt_gen < gen_npy.shape[2]; ++pt_gen){
+                for(unsigned dR_gen=0; dR_gen < gen_npy.shape[3]; ++dR_gen){
+                    for(unsigned order_reco=0; order_reco < reco_npy.shape[0]; ++order_reco){
+                        for(unsigned btag_reco=0; btag_reco < reco_npy.shape[1]; ++btag_reco){
+                            for(unsigned pt_reco=0; pt_reco < reco_npy.shape[2]; ++pt_reco){
+                                for(unsigned dR_reco=0; dR_reco < reco_npy.shape[3]; ++dR_reco){
+    if(order_reco == order_gen){
+                                        transfer_expanded_vec.push_back(transfer_npy.data[itransfer++]);
+                                    } else {
+                                        transfer_expanded_vec.push_back(0.);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Eigen::MatrixXd transfer_expanded = Eigen::Map<Eigen::MatrixXd>(transfer_expanded_vec.data(), reco_size, gen_size);
+    transfer_expanded.transposeInPlace();
+
+    /*printf("transfer_expanded shape: %lu %lu\n", transfer_expanded.rows(), transfer_expanded.cols());
+    printf("reco shape: %lu\n", reco_size);
+    printf("gen shape: %lu\n", gen_size);*/
+
+    //check sums
+    /*Eigen::VectorXd colsum = transfer_expanded.colwise().sum();
+    Eigen::VectorXd rowsum = transfer_expanded.rowwise().sum();
+    printf("colsum shape: %lu\n", colsum.size());
+    printf("rowsum shape: %lu\n", rowsum.size());
+    printf("column sum diff test: %g\n", (colsum - recopure).norm());
+    printf("row sum diff test: %g\n", (rowsum - recopure).norm());*/
+
+    //step 2: divide by gen
+    Eigen::MatrixXd transfer_over_gen(reco_size, gen_size);
+    for(size_t iReco=0; iReco<reco_size; ++iReco){
+        for(size_t iGen=0; iGen<gen_size; ++iGen){
+            if(genpure(iGen) > 0){
+                transfer_over_gen(iReco, iGen) = transfer_expanded(iReco, iGen) /= genpure(iGen);
+            } else {
+                transfer_over_gen(iReco, iGen) = 0;
+            }
+        }
+    }
+
+    //check forward
+    //printf("forward diff test: %g\n", (transfer_over_gen * genpure - recopure).norm());
+
+    //step 3: compute reco template
+
+    recopure = (recopure.array() == 0).select(1, recopure); //avoid division by zero
+    Eigen::VectorXd reco_template = reco.array()/recopure.array();
+    
+    //step 4: compute gen template
+
+    gen = (gen.array() == 0).select(1, gen); //avoid division by zero
+    Eigen::VectorXd gen_template = genpure.array()/gen.array();
+
+    //step 5: subsume templates into transfer matrix
+    transfer = Eigen::MatrixXd(reco_size, gen_size);
+    for(size_t iReco=0; iReco<reco_size; ++iReco){
+        for(size_t iGen=0; iGen<gen_size; ++iGen){
+            transfer(iReco, iGen) = transfer_over_gen(iReco, iGen) * reco_template(iReco) * gen_template(iGen);
+        }
+    }
+    printf("transfer shape: %lu %lu\n", transfer.rows(), transfer.cols());
 }
 
 template <typename S, typename T>
@@ -78,172 +218,154 @@ T solve(const Eigen::MatrixXd& transfer,
     return unfolded;
 }
 
-int main(){
-    auto reco =     npy::read_npy<double>("test/recopure.npy");
-    auto gen =      npy::read_npy<double>("test/genpure.npy");
-    auto covreco =  npy::read_npy<double>("test/covreco.npy");
-    auto covgen =   npy::read_npy<double>("test/covgen.npy");
-    auto transfer = npy::read_npy<double>("test/transfer.npy");
+void handle_forward(const string& gen_folder,
+                    const string& transfer_folder,
+                    const string& out_folder){
+    Eigen::MatrixXd transfer;
+    Eigen::VectorXd gen;
+    Eigen::MatrixXd covgen;
+    size_t gen_size;
+    std::vector<size_t> gen_shape;
+    std::vector<size_t> covgen_shape;
 
-    printf("reco shape: ");
-    printVec(reco.shape);
-    printf("\tnum_elements: %lu\n", reco.data.size());
-    printf("\tsum: %f\n", recursive_reduce(reco.data, 0.));
-    printf("covreco shape: ");
-    printVec(covreco.shape);
-    printf("\tnum_elements: %lu\n", covreco.data.size());
-    printf("\tsum: %f\n", recursive_reduce(covreco.data, 0.));
-    printf("gen shape: ");
-    printVec(gen.shape);
-    printf("\tnum_elements: %lu\n", gen.data.size());
-    printf("\tsum: %f\n", recursive_reduce(gen.data, 0.));
-    printf("covgen shape: ");
-    printVec(covgen.shape);
-    printf("\tnum_elements: %lu\n", covgen.data.size());
-    printf("\tsum: %f\n", recursive_reduce(covgen.data, 0.));
-    printf("transfer shape: ");
-    printVec(transfer.shape);
-    printf("\tnum_elements: %lu\n", transfer.data.size());
-    printf("\tsum: %f\n", recursive_reduce(transfer.data, 0.));
-    printf("\n");
+    getGen(gen_folder, 
+           gen, covgen, 
+           gen_size, gen_shape, covgen_shape);
+    getTransfer(transfer_folder, transfer);
 
-    //Now in order to do the linear algebra 
-    //we need to make everything into 2D arrays
-    //or 1D vectors
+    Eigen::VectorXd forwarded;
+    Eigen::MatrixXd covforwarded;
 
-    //reco and gen can just be reiterpreted as 1D
-    size_t reco_size = reco.data.size();
-    size_t gen_size = gen.data.size();
+    forwardfold(gen, covgen, transfer,
+            forwarded, covforwarded);
 
-    //covreco and covgen can just be reinterpreted as 2D
-    std::pair<size_t, size_t> covreco_shape = {reco_size, reco_size};
-    std::pair<size_t, size_t> covgen_shape = {gen_size, gen_size};
+    dump_npy(out_folder + "/forwarded.npy", forwarded, gen_shape);
+    dump_npy(out_folder + "/covforwarded.npy", covforwarded, covgen_shape);
+}
 
-    //transfer is more complicated
-    //because it's block-diagonal in the order (first) dimension
-    //and we haven't saved the full dimensionality
-    // -> we need to expand it back out
+void handle_unfold(const string& reco_folder,
+                   const string& transfer_folde,
+                   const string& out_folder){
+    Eigen::MatrixXd transfer;
+    Eigen::VectorXd reco;
+    Eigen::MatrixXd covreco;
+    size_t reco_size;
+    std::vector<size_t> reco_shape;
+    std::vector<size_t> covreco_shape;
 
-    unsigned itransfer=0;
-    std::vector<double> transfer_expanded;
-    transfer_expanded.reserve(reco_size * gen_size);
-    for(unsigned order_gen=0; order_gen < gen.shape[0]; ++order_gen){
-        for(unsigned btag_gen=0; btag_gen < gen.shape[1]; ++btag_gen){
-            for(unsigned pt_gen=0; pt_gen < gen.shape[2]; ++pt_gen){
-                for(unsigned dR_gen=0; dR_gen < gen.shape[3]; ++dR_gen){
-                    for(unsigned order_reco=0; order_reco < reco.shape[0]; ++order_reco){
-                        for(unsigned btag_reco=0; btag_reco < reco.shape[1]; ++btag_reco){
-                            for(unsigned pt_reco=0; pt_reco < reco.shape[2]; ++pt_reco){
-                                for(unsigned dR_reco=0; dR_reco < reco.shape[3]; ++dR_reco){
-                                    if(order_reco == order_gen){
-                                        transfer_expanded.push_back(transfer.data[itransfer++]);
-                                    } else {
-                                        transfer_expanded.push_back(0.);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    getReco(reco_folder, 
+            reco, covreco, 
+            reco_size, reco_shape, covreco_shape);
+    getTransfer(transfer_folde, transfer);
 
-    printf("transfer_expanded size: %lu\n\n", transfer_expanded.size());
+    Eigen::VectorXd unfolded;
+    Eigen::MatrixXd covunfolded;
 
-    //now we can plug these into eigen
+    unfold(reco, covreco, transfer,
+            unfolded, covunfolded);
 
-    Eigen::VectorXd reco_eigen = Eigen::Map<Eigen::VectorXd> (reco.data.data(), reco_size);
-    Eigen::MatrixXd covreco_eigen = Eigen::Map<Eigen::MatrixXd>(covreco.data.data(), covreco_shape.first, covreco_shape.second);
-    Eigen::VectorXd gen_eigen = Eigen::Map<Eigen::VectorXd>(gen.data.data(), gen_size);
-    Eigen::MatrixXd covgen_eigen = Eigen::Map<Eigen::MatrixXd>(covgen.data.data(), covgen_shape.first, covgen_shape.second);
-    Eigen::MatrixXd transfer_eigen = Eigen::Map<Eigen::MatrixXd>(transfer_expanded.data(), reco_size, gen_size);
+    dump_npy(out_folder + "/unfolded.npy", unfolded, reco_shape);
+    dump_npy(out_folder + "/covunfolded.npy", covunfolded, covreco_shape);
+}
 
-    //oops its backwards
-    transfer_eigen.transposeInPlace();
 
-    double sum_reco = reco_eigen.sum();
-    double sum_gen = gen_eigen.sum();
-    double sum_transfer = transfer_eigen.sum();
-    double sum_covreco = covreco_eigen.sum();
-    double sum_covgen = covgen_eigen.sum();
+int main(int argc, char** argv){
+    CLI::App program("forward-folding and unfolding utility");
+    argv = program.ensure_utf8(argv);
 
-    printf("after conversion to Eigen\n");
-    printf("sum reco: %f\n", sum_reco);
-    printf("sum covreco: %f\n", sum_covreco);
-    printf("sum gen: %f\n", sum_gen);
-    printf("sum covgen: %f\n", sum_covgen);
-    printf("sum transfer: %f\n\n", sum_transfer);
+    std::string data_folder;
+    std::string transfer_folder;
+    std::string out_folder;
 
-    Eigen::VectorXd sum_transfer_row = transfer_eigen.rowwise().sum();
-    Eigen::VectorXd sum_transfer_col = transfer_eigen.colwise().sum();
-
-    Eigen::VectorXd recoLessRowSum = reco_eigen - sum_transfer_row;
-    Eigen::VectorXd recoLessColSum = reco_eigen - sum_transfer_col;
-    printf("recoLessRowSum: %f\n", recoLessRowSum.norm());
-    printf("recoLessColSum: %f\n", recoLessColSum.norm());
-
-    Eigen::VectorXd ones = Eigen::VectorXd::Ones(gen_size);
-    Eigen::VectorXd transfer_times_ones = transfer_eigen * ones;
-    Eigen::VectorXd onemult_diff = transfer_times_ones - reco_eigen;
-    printf("onemult_diff: %f\n", onemult_diff.norm());
-
-    Eigen::MatrixXd transfer_over_gen(reco_size, gen_size);
-
-    for(unsigned iReco=0; iReco<reco_size; ++iReco){
-        for(unsigned iGen=0; iGen<gen_size; ++iGen){
-            if(gen_eigen(iGen) > 0){
-                transfer_over_gen(iReco, iGen) = transfer_eigen(iReco, iGen) /= gen_eigen(iGen);
-            } else {
-                transfer_over_gen(iReco, iGen) = 0;
-            }
-        }
-    }
-    Eigen::VectorXd forward = transfer_over_gen * gen_eigen;
-    Eigen::VectorXd diff = reco_eigen - forward;
-    printf("forward diff: %f\n\n", diff.norm());
-
-    Eigen::MatrixXd thecov = covreco_eigen;
-    //Eigen::MatrixXd thecov = Eigen::MatrixXd::Identity(reco_size, reco_size);
-
-    Eigen::LLT<Eigen::MatrixXd> llt(thecov);
-    Eigen::MatrixXd L = llt.matrixL();
+    CLI::App* forwardcmd = program.add_subcommand("forward", "Perform forward folding")->ignore_case();
+    forwardcmd->add_option("gen", data_folder, 
+            "Folder containing gen, covgen matrices")
+            ->required()
+            ->option_text("PATH");
+    forwardcmd->add_option("transfer", transfer_folder,
+            "Folder containing transfer matrix")
+            ->required()
+            ->option_text("PATH");
+    forwardcmd->add_option("out", out_folder,
+            "Output folder")
+            ->required()
+            ->option_text("PATH");
     
-    Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd> codL(L);
-    Eigen::VectorXd Greco = codL.solve(reco_eigen);
-    Eigen::MatrixXd Gtransfer = codL.solve(transfer_over_gen);
+    CLI::App* unfoldcmd = program.add_subcommand("unfold", "Perform unfolding")->ignore_case();
+    unfoldcmd->add_option("reco", data_folder,
+            "Folder containing reco, covreco matrices")
+            ->required()
+            ->option_text("PATH");
+    unfoldcmd->add_option("transfer", transfer_folder,
+            "Folder containing transfer matrix")
+            ->required()
+            ->option_text("PATH");
+    unfoldcmd->add_option("out", out_folder,
+            "Output folder")
+            ->required()
+            ->option_text("PATH");
 
-    Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd> codGtransfer(Gtransfer);
-    Eigen::VectorXd unfolded = codGtransfer.solve(Greco);
+    CLI::App* foldunfoldcmd = program.add_subcommand("foldunfold", "Perform forward folding and unfolding")->ignore_case();
+    foldunfoldcmd->add_option("genAndReco", data_folder,
+            "Folder containing gen, reco, ... matrices")
+            ->required()
+            ->option_text("PATH");
+    foldunfoldcmd->add_option("transfer", transfer_folder,
+            "Folder containing transfer matrix")
+            ->required()
+            ->option_text("PATH");
+    foldunfoldcmd->add_option("out", out_folder,
+            "Output folder")
+            ->required()
+            ->option_text("PATH");
 
-    printf("unfold diff: %g\n", (unfolded-gen_eigen).norm());
+    program.require_subcommand(1);
 
-    Eigen::MatrixXd GtransferGtransfer = Gtransfer.transpose() * Gtransfer;
-    Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd> codGtransferGtransfer(GtransferGtransfer);
-    Eigen::MatrixXd GtransferGtransferInv = codGtransferGtransfer.pseudoInverse();
-    Eigen::MatrixXd GtransferGtransferInv2 = codGtransferGtransfer.solve(Eigen::MatrixXd::Identity(reco_size, reco_size));
+    CLI11_PARSE(program, argc, argv);
 
-    printf("Gtransfer inv diff: %g\n", (GtransferGtransferInv - GtransferGtransferInv2).norm());
+    Eigen::MatrixXd transfer;
+    Eigen::VectorXd reco, gen;
+    Eigen::MatrixXd covreco, covgen;
+    size_t reco_size, gen_size;
+    std::vector<size_t> reco_shape, gen_shape;
+    std::vector<size_t> covreco_shape, covgen_shape;
 
-    std::vector<double> unfvec(unfolded.reshaped().begin(), 
-                               unfolded.reshaped().end());
+    getReco("testherwignpy", 
+            reco, covreco, 
+            reco_size, reco_shape, covreco_shape);
+    getGen("testherwignpy", 
+           gen, covgen, 
+           gen_size, gen_shape, covgen_shape);
+    getTransfer("testpythianpy", transfer);
 
-    npy::npy_data<double> unfnpy; 
-    unfnpy.data = unfvec;
-    unfnpy.shape = gen.shape;
-    unfnpy.fortran_order = false;
+    Eigen::VectorXd forwarded;
+    Eigen::MatrixXd covforwarded;
 
-    npy::write_npy("unfolded.npy", unfnpy);
+    forwardfold(gen, covgen, transfer,
+            forwarded, covforwarded);
+    printf("\nforward diff: %f\n\n", (forwarded-reco).norm());
 
-    std::vector<double> covunfvec(GtransferGtransferInv.reshaped().begin(), 
-                                  GtransferGtransferInv.reshaped().end());
+    Eigen::VectorXd unfolded;
+    Eigen::MatrixXd covunfolded;
 
-    npy::npy_data<double> covunfnpy;
-    covunfnpy.data = covunfvec;
-    covunfnpy.shape = covgen.shape;
-    covunfnpy.fortran_order = false;
+    unfold(reco, covreco, transfer,
+            unfolded, covunfolded);
+    printf("\nunfold diff: %f\n\n", (unfolded-gen).norm());
 
-    npy::write_npy("covunfolded.npy", covunfnpy);
+    dump_npy("unfolded.npy", unfolded, gen_shape);
+    dump_npy("covunfolded.npy", covunfolded, covgen_shape);
+
+    std::vector<size_t> transfershape;
+    transfershape.insert(transfershape.end(), 
+            reco_shape.begin(), 
+            reco_shape.end());
+    transfershape.insert(transfershape.end(),
+            gen_shape.begin(),
+            gen_shape.end());
+    dump_npy("transfer_processed.npy", transfer, transfershape);
+
+    dump_npy("forwarded.npy", forwarded, reco_shape);
+    dump_npy("covforwarded.npy", covforwarded, covreco_shape);
 
     return 0;
 }
