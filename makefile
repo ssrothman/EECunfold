@@ -4,7 +4,7 @@ INCLUDES = -I./simon_util_cpp -I./libnpy/include -I/home/simon/miniforge3/includ
 LIBRARIES = -llapacke -llapack -lblas -lstdc++
 LD_FLAGS = -L/home/simon/miniforge3/lib
 
-OPTIM_FLAGS = -O3 -march=native -mtune=native -flto
+OPTIM_FLAGS = -O3 -march=native -mtune=native -flto=auto
 
 default: main main_optim
 

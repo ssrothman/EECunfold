@@ -218,9 +218,9 @@ T solve(const Eigen::MatrixXd& transfer,
     return unfolded;
 }
 
-void handle_forward(const string& gen_folder,
-                    const string& transfer_folder,
-                    const string& out_folder){
+void handle_forward(const std::string& gen_folder,
+                    const std::string& transfer_folder,
+                    const std::string& out_folder){
     Eigen::MatrixXd transfer;
     Eigen::VectorXd gen;
     Eigen::MatrixXd covgen;
@@ -243,9 +243,9 @@ void handle_forward(const string& gen_folder,
     dump_npy(out_folder + "/covforwarded.npy", covforwarded, covgen_shape);
 }
 
-void handle_unfold(const string& reco_folder,
-                   const string& transfer_folde,
-                   const string& out_folder){
+void handle_unfold(const std::string& reco_folder,
+                   const std::string& transfer_folde,
+                   const std::string& out_folder){
     Eigen::MatrixXd transfer;
     Eigen::VectorXd reco;
     Eigen::MatrixXd covreco;
@@ -277,16 +277,16 @@ int main(int argc, char** argv){
     std::string transfer_folder;
     std::string out_folder;
 
-    CLI::App* forwardcmd = program.add_subcommand("forward", "Perform forward folding")->ignore_case();
-    forwardcmd->add_option("gen", data_folder, 
+    CLI::App* foldcmd = program.add_subcommand("fold", "Perform forward folding")->ignore_case();
+    foldcmd->add_option("gen", data_folder, 
             "Folder containing gen, covgen matrices")
             ->required()
             ->option_text("PATH");
-    forwardcmd->add_option("transfer", transfer_folder,
+    foldcmd->add_option("transfer", transfer_folder,
             "Folder containing transfer matrix")
             ->required()
             ->option_text("PATH");
-    forwardcmd->add_option("out", out_folder,
+    foldcmd->add_option("out", out_folder,
             "Output folder")
             ->required()
             ->option_text("PATH");
@@ -323,49 +323,13 @@ int main(int argc, char** argv){
 
     CLI11_PARSE(program, argc, argv);
 
-    Eigen::MatrixXd transfer;
-    Eigen::VectorXd reco, gen;
-    Eigen::MatrixXd covreco, covgen;
-    size_t reco_size, gen_size;
-    std::vector<size_t> reco_shape, gen_shape;
-    std::vector<size_t> covreco_shape, covgen_shape;
+    if(foldcmd->parsed() || foldunfoldcmd->parsed()){
+        handle_forward(data_folder, transfer_folder, out_folder);
+    } 
 
-    getReco("testherwignpy", 
-            reco, covreco, 
-            reco_size, reco_shape, covreco_shape);
-    getGen("testherwignpy", 
-           gen, covgen, 
-           gen_size, gen_shape, covgen_shape);
-    getTransfer("testpythianpy", transfer);
-
-    Eigen::VectorXd forwarded;
-    Eigen::MatrixXd covforwarded;
-
-    forwardfold(gen, covgen, transfer,
-            forwarded, covforwarded);
-    printf("\nforward diff: %f\n\n", (forwarded-reco).norm());
-
-    Eigen::VectorXd unfolded;
-    Eigen::MatrixXd covunfolded;
-
-    unfold(reco, covreco, transfer,
-            unfolded, covunfolded);
-    printf("\nunfold diff: %f\n\n", (unfolded-gen).norm());
-
-    dump_npy("unfolded.npy", unfolded, gen_shape);
-    dump_npy("covunfolded.npy", covunfolded, covgen_shape);
-
-    std::vector<size_t> transfershape;
-    transfershape.insert(transfershape.end(), 
-            reco_shape.begin(), 
-            reco_shape.end());
-    transfershape.insert(transfershape.end(),
-            gen_shape.begin(),
-            gen_shape.end());
-    dump_npy("transfer_processed.npy", transfer, transfershape);
-
-    dump_npy("forwarded.npy", forwarded, reco_shape);
-    dump_npy("covforwarded.npy", covforwarded, covreco_shape);
+    if(unfoldcmd->parsed() || foldunfoldcmd->parsed()){
+        handle_unfold(data_folder, transfer_folder, out_folder);
+    }
 
     return 0;
 }
