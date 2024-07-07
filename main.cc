@@ -16,11 +16,37 @@ using namespace std::chrono;
 #include <Eigen/Dense>
 #include <Eigen/Cholesky>
 
+void get_transfer_shape(const std::vector<size_t>& reco_shape,
+                                   const std::vector<size_t>& gen_shape,
+                                   std::vector<size_t>& transfer_shape){
+    transfer_shape.clear();
+    transfer_shape.insert(transfer_shape.end(), reco_shape.begin(), reco_shape.end());
+    transfer_shape.insert(transfer_shape.end(), gen_shape.begin(), gen_shape.end());
+}
+
+void get_all_shapes(const std::string& folder,
+        std::vector<size_t>& gen_shape,
+        std::vector<size_t>& covgen_shape,
+        std::vector<size_t>& reco_shape,
+        std::vector<size_t>& covreco_shape,
+        std::vector<size_t>& transfer_shape){
+    auto gen_npy = npy::read_npy<double>(folder + "/gen.npy");
+    auto covgen_npy = npy::read_npy<double>(folder + "/covgen.npy");
+    auto reco_npy = npy::read_npy<double>(folder + "/reco.npy");
+    auto covreco_npy = npy::read_npy<double>(folder + "/covreco.npy");
+
+    gen_shape = gen_npy.shape;
+    covgen_shape = covgen_npy.shape;
+    reco_shape = reco_npy.shape;
+    covreco_shape = covreco_npy.shape;
+    get_transfer_shape(reco_shape, gen_shape, transfer_shape);
+}
 
 template <typename T>
 void dump_npy(const std::string fname,
               const T& data,
               const std::vector<size_t>& shape){
+    printf("Dumping to %s\n", fname.c_str());
     npy::npy_data<double> npydata;
     npydata.data = std::vector<double>(data.reshaped().begin(),
                                        data.reshaped().end());
@@ -99,13 +125,18 @@ void getReco(const std::string& folder,
     printf("covreco shape: %lu %lu\n", covreco.rows(), covreco.cols());
 }
 
-void getTransfer(const std::string& folder,
-                 Eigen::MatrixXd& transfer){
-    auto reco_npy = npy::read_npy<double>(folder + "/reco.npy");
-    auto recopure_npy = npy::read_npy<double>(folder + "/recopure.npy");
-    auto gen_npy = npy::read_npy<double>(folder + "/gen.npy");
-    auto genpure_npy = npy::read_npy<double>(folder + "/genpure.npy");
-    auto transfer_npy = npy::read_npy<double>(folder + "/transfer.npy");
+void getTransfer(const std::string& transfer_folder,
+                 const std::string& reco_template_folder,
+                 const std::string& gen_template_folder,
+                 Eigen::MatrixXd& transfer,
+                 Eigen::VectorXd& reco_template,
+                 Eigen::VectorXd& gen_template){
+
+    auto reco_npy = npy::read_npy<double>(reco_template_folder + "/reco.npy");
+    auto recopure_npy = npy::read_npy<double>(reco_template_folder + "/recopure.npy");
+    auto gen_npy = npy::read_npy<double>(gen_template_folder + "/gen.npy");
+    auto genpure_npy = npy::read_npy<double>(gen_template_folder + "/genpure.npy");
+    auto transfer_npy = npy::read_npy<double>(transfer_folder + "/transfer.npy");
 
     const size_t reco_size = reco_npy.data.size();
     const size_t gen_size = gen_npy.data.size();
@@ -174,12 +205,12 @@ void getTransfer(const std::string& folder,
     //step 3: compute reco template
 
     recopure = (recopure.array() == 0).select(1, recopure); //avoid division by zero
-    Eigen::VectorXd reco_template = reco.array()/recopure.array();
+    reco_template = reco.array()/recopure.array();
     
     //step 4: compute gen template
 
     gen = (gen.array() == 0).select(1, gen); //avoid division by zero
-    Eigen::VectorXd gen_template = genpure.array()/gen.array();
+    gen_template = genpure.array()/gen.array();
 
     //step 5: subsume templates into transfer matrix
     transfer = Eigen::MatrixXd(reco_size, gen_size);
@@ -220,18 +251,30 @@ T solve(const Eigen::MatrixXd& transfer,
 
 void handle_forward(const std::string& gen_folder,
                     const std::string& transfer_folder,
+                    const std::string& reco_template_folder,
+                    const std::string& gen_template_folder,
                     const std::string& out_folder){
     Eigen::MatrixXd transfer;
     Eigen::VectorXd gen;
     Eigen::MatrixXd covgen;
+    Eigen::VectorXd reco_template;
+    Eigen::VectorXd gen_template;
     size_t gen_size;
     std::vector<size_t> gen_shape;
     std::vector<size_t> covgen_shape;
+    std::vector<size_t> reco_shape;
+    std::vector<size_t> covreco_shape;
+    std::vector<size_t> transfer_shape;
 
     getGen(gen_folder, 
            gen, covgen, 
            gen_size, gen_shape, covgen_shape);
-    getTransfer(transfer_folder, transfer);
+    getTransfer(transfer_folder, 
+                reco_template_folder,
+                gen_template_folder,
+                transfer,
+                reco_template,
+                gen_template);
 
     Eigen::VectorXd forwarded;
     Eigen::MatrixXd covforwarded;
@@ -239,24 +282,41 @@ void handle_forward(const std::string& gen_folder,
     forwardfold(gen, covgen, transfer,
             forwarded, covforwarded);
 
-    dump_npy(out_folder + "/forwarded.npy", forwarded, gen_shape);
-    dump_npy(out_folder + "/covforwarded.npy", covforwarded, covgen_shape);
+    get_all_shapes(gen_folder, gen_shape, covgen_shape, reco_shape, covreco_shape, transfer_shape);
+
+    dump_npy(out_folder + "/forwarded.npy", forwarded, reco_shape);
+    dump_npy(out_folder + "/covforwarded.npy", covforwarded, covreco_shape);
+    dump_npy(out_folder + "/transfer.npy", transfer, transfer_shape);
+    dump_npy(out_folder + "/reco_template.npy", reco_template, reco_shape);
+    dump_npy(out_folder + "/gen_template.npy", gen_template, gen_shape);
 }
 
 void handle_unfold(const std::string& reco_folder,
-                   const std::string& transfer_folde,
+                   const std::string& transfer_folder,
+                   const std::string& reco_template_folder,
+                   const std::string& gen_template_folder,
                    const std::string& out_folder){
     Eigen::MatrixXd transfer;
     Eigen::VectorXd reco;
     Eigen::MatrixXd covreco;
+    Eigen::VectorXd gen_template;
+    Eigen::VectorXd reco_template;
     size_t reco_size;
     std::vector<size_t> reco_shape;
     std::vector<size_t> covreco_shape;
+    std::vector<size_t> gen_shape;
+    std::vector<size_t> covgen_shape;
+    std::vector<size_t> transfer_shape;
 
     getReco(reco_folder, 
             reco, covreco, 
             reco_size, reco_shape, covreco_shape);
-    getTransfer(transfer_folde, transfer);
+    getTransfer(transfer_folder,
+                reco_template_folder,
+                gen_template_folder,
+                transfer,
+                reco_template,
+                gen_template);
 
     Eigen::VectorXd unfolded;
     Eigen::MatrixXd covunfolded;
@@ -264,10 +324,12 @@ void handle_unfold(const std::string& reco_folder,
     unfold(reco, covreco, transfer,
             unfolded, covunfolded);
 
-    dump_npy(out_folder + "/unfolded.npy", unfolded, reco_shape);
-    dump_npy(out_folder + "/covunfolded.npy", covunfolded, covreco_shape);
+    dump_npy(out_folder + "/unfolded.npy", unfolded, gen_shape);
+    dump_npy(out_folder + "/covunfolded.npy", covunfolded, covgen_shape);
+    dump_npy(out_folder + "/transfer.npy", transfer, transfer_shape);
+    dump_npy(out_folder + "/reco_template.npy", reco_template, reco_shape);
+    dump_npy(out_folder + "/gen_template.npy", gen_template, gen_shape);
 }
-
 
 int main(int argc, char** argv){
     CLI::App program("forward-folding and unfolding utility");
@@ -275,6 +337,8 @@ int main(int argc, char** argv){
 
     std::string data_folder;
     std::string transfer_folder;
+    std::string reco_template_folder;
+    std::string gen_template_folder;
     std::string out_folder;
 
     CLI::App* foldcmd = program.add_subcommand("fold", "Perform forward folding")->ignore_case();
@@ -284,6 +348,14 @@ int main(int argc, char** argv){
             ->option_text("PATH");
     foldcmd->add_option("transfer", transfer_folder,
             "Folder containing transfer matrix")
+            ->required()
+            ->option_text("PATH");
+    foldcmd->add_option("reco_template", reco_template_folder,
+            "Folder containing reco, recopure for template")
+            ->required()
+            ->option_text("PATH");
+    foldcmd->add_option("gen_template", gen_template_folder,
+            "Folder containing gen, genpure for template")
             ->required()
             ->option_text("PATH");
     foldcmd->add_option("out", out_folder,
@@ -300,6 +372,14 @@ int main(int argc, char** argv){
             "Folder containing transfer matrix")
             ->required()
             ->option_text("PATH");
+    unfoldcmd->add_option("reco_template", reco_template_folder,
+            "Folder containing reco, recopure for template")
+            ->required()
+            ->option_text("PATH");
+    unfoldcmd->add_option("gen_template", gen_template_folder,
+            "Folder containing gen, genpure for template")
+            ->required()
+            ->option_text("PATH");
     unfoldcmd->add_option("out", out_folder,
             "Output folder")
             ->required()
@@ -314,6 +394,14 @@ int main(int argc, char** argv){
             "Folder containing transfer matrix")
             ->required()
             ->option_text("PATH");
+    foldunfoldcmd->add_option("reco_template", reco_template_folder,
+            "Folder containing reco, recopure for template")
+            ->required()
+            ->option_text("PATH");
+    foldunfoldcmd->add_option("gen_template", gen_template_folder,
+            "Folder containing gen, genpure for template")
+            ->required()
+            ->option_text("PATH");
     foldunfoldcmd->add_option("out", out_folder,
             "Output folder")
             ->required()
@@ -324,11 +412,11 @@ int main(int argc, char** argv){
     CLI11_PARSE(program, argc, argv);
 
     if(foldcmd->parsed() || foldunfoldcmd->parsed()){
-        handle_forward(data_folder, transfer_folder, out_folder);
+        handle_forward(data_folder, transfer_folder, reco_template_folder, gen_template_folder, out_folder);
     } 
 
     if(unfoldcmd->parsed() || foldunfoldcmd->parsed()){
-        handle_unfold(data_folder, transfer_folder, out_folder);
+        handle_unfold(data_folder, transfer_folder, reco_template_folder, gen_template_folder, out_folder);
     }
 
     return 0;
