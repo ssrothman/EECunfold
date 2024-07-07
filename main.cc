@@ -136,7 +136,7 @@ void getTransfer(const std::string& transfer_folder,
     auto recopure_npy = npy::read_npy<double>(reco_template_folder + "/recopure.npy");
     auto gen_npy = npy::read_npy<double>(gen_template_folder + "/gen.npy");
     auto genpure_npy = npy::read_npy<double>(gen_template_folder + "/genpure.npy");
-    auto transfer_npy = npy::read_npy<double>(transfer_folder + "/transfer.npy");
+    auto transfer_npy = npy::read_npy<double>(transfer_folder + "/transfer_goodshape.npy");
 
     const size_t reco_size = reco_npy.data.size();
     const size_t gen_size = gen_npy.data.size();
@@ -147,45 +147,7 @@ void getTransfer(const std::string& transfer_folder,
     Eigen::VectorXd gen = Eigen::Map<Eigen::VectorXd>(gen_npy.data.data(), gen_size);
     Eigen::VectorXd genpure = Eigen::Map<Eigen::VectorXd>(genpure_npy.data.data(), gen_size);
 
-    //step 1: expand order dimension in transfer matrix
-    size_t itransfer=0;
-    std::vector<double> transfer_expanded_vec;
-    transfer_expanded_vec.reserve(reco_size * gen_size);
-    for(unsigned order_gen=0; order_gen < gen_npy.shape[0]; ++order_gen){
-        for(unsigned btag_gen=0; btag_gen < gen_npy.shape[1]; ++btag_gen){
-            for(unsigned pt_gen=0; pt_gen < gen_npy.shape[2]; ++pt_gen){
-                for(unsigned dR_gen=0; dR_gen < gen_npy.shape[3]; ++dR_gen){
-                    for(unsigned order_reco=0; order_reco < reco_npy.shape[0]; ++order_reco){
-                        for(unsigned btag_reco=0; btag_reco < reco_npy.shape[1]; ++btag_reco){
-                            for(unsigned pt_reco=0; pt_reco < reco_npy.shape[2]; ++pt_reco){
-                                for(unsigned dR_reco=0; dR_reco < reco_npy.shape[3]; ++dR_reco){
-    if(order_reco == order_gen){
-                                        transfer_expanded_vec.push_back(transfer_npy.data[itransfer++]);
-                                    } else {
-                                        transfer_expanded_vec.push_back(0.);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    Eigen::MatrixXd transfer_expanded = Eigen::Map<Eigen::MatrixXd>(transfer_expanded_vec.data(), reco_size, gen_size);
-    transfer_expanded.transposeInPlace();
-
-    /*printf("transfer_expanded shape: %lu %lu\n", transfer_expanded.rows(), transfer_expanded.cols());
-    printf("reco shape: %lu\n", reco_size);
-    printf("gen shape: %lu\n", gen_size);*/
-
-    //check sums
-    /*Eigen::VectorXd colsum = transfer_expanded.colwise().sum();
-    Eigen::VectorXd rowsum = transfer_expanded.rowwise().sum();
-    printf("colsum shape: %lu\n", colsum.size());
-    printf("rowsum shape: %lu\n", rowsum.size());
-    printf("column sum diff test: %g\n", (colsum - recopure).norm());
-    printf("row sum diff test: %g\n", (rowsum - recopure).norm());*/
+    Eigen::MatrixXd transfer_expanded = Eigen::Map<Eigen::MatrixXd>(transfer_npy.data.data(), reco_size, gen_size);
 
     //step 2: divide by gen
     Eigen::MatrixXd transfer_over_gen(reco_size, gen_size);
@@ -286,7 +248,7 @@ void handle_forward(const std::string& gen_folder,
 
     dump_npy(out_folder + "/forwarded.npy", forwarded, reco_shape);
     dump_npy(out_folder + "/covforwarded.npy", covforwarded, covreco_shape);
-    dump_npy(out_folder + "/transfer.npy", transfer, transfer_shape);
+    dump_npy(out_folder + "/transfer_mat.npy", transfer, transfer_shape);
     dump_npy(out_folder + "/reco_template.npy", reco_template, reco_shape);
     dump_npy(out_folder + "/gen_template.npy", gen_template, gen_shape);
 }
@@ -326,7 +288,7 @@ void handle_unfold(const std::string& reco_folder,
 
     dump_npy(out_folder + "/unfolded.npy", unfolded, gen_shape);
     dump_npy(out_folder + "/covunfolded.npy", covunfolded, covgen_shape);
-    dump_npy(out_folder + "/transfer.npy", transfer, transfer_shape);
+    dump_npy(out_folder + "/transfer_mat.npy", transfer, transfer_shape);
     dump_npy(out_folder + "/reco_template.npy", reco_template, reco_shape);
     dump_npy(out_folder + "/gen_template.npy", gen_template, gen_shape);
 }
