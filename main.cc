@@ -130,7 +130,8 @@ void getTransfer(const std::string& transfer_folder,
                  const std::string& gen_template_folder,
                  Eigen::MatrixXd& transfer,
                  Eigen::VectorXd& reco_template,
-                 Eigen::VectorXd& gen_template){
+                 Eigen::VectorXd& gen_template,
+                 bool test=true){
 
     auto reco_npy = npy::read_npy<double>(reco_template_folder + "/reco.npy");
     auto recopure_npy = npy::read_npy<double>(reco_template_folder + "/recopure.npy");
@@ -149,6 +150,13 @@ void getTransfer(const std::string& transfer_folder,
 
     Eigen::MatrixXd transfer_expanded = Eigen::Map<Eigen::MatrixXd>(transfer_npy.data.data(), reco_size, gen_size);
 
+    if (test){
+        Eigen::VectorXd sumtransfer_R = transfer_expanded.rowwise().sum();
+        printf("sumtransfer_R - reco: %g\n", (sumtransfer_R - recopure).norm());
+        Eigen::VectorXd sumtransfer_C = transfer_expanded.colwise().sum();
+        printf("sumtransfer_C - reco: %g\n", (sumtransfer_C - recopure).norm());
+    }
+
     //step 2: divide by gen
     Eigen::MatrixXd transfer_over_gen(reco_size, gen_size);
     for(size_t iReco=0; iReco<reco_size; ++iReco){
@@ -159,6 +167,11 @@ void getTransfer(const std::string& transfer_folder,
                 transfer_over_gen(iReco, iGen) = 0;
             }
         }
+    }
+
+    if (test){
+        Eigen::VectorXd forwardtest = transfer_over_gen * genpure;
+        printf("forward diff test: %g\n", (forwardtest - recopure).norm());
     }
 
     //check forward
@@ -181,6 +194,12 @@ void getTransfer(const std::string& transfer_folder,
             transfer(iReco, iGen) = transfer_over_gen(iReco, iGen) * reco_template(iReco) * gen_template(iGen);
         }
     }
+    
+    if (test){
+        Eigen::VectorXd forwardtest2 = transfer * gen;
+        printf("forward diff test2: %g\n", (forwardtest2 - reco).norm());
+    }
+
     printf("transfer shape: %lu %lu\n", transfer.rows(), transfer.cols());
 }
 
