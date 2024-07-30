@@ -149,6 +149,7 @@ void getTransfer(const std::string& transfer_folder,
     Eigen::VectorXd genpure = Eigen::Map<Eigen::VectorXd>(genpure_npy.data.data(), gen_size);
 
     Eigen::MatrixXd transfer_expanded = Eigen::Map<Eigen::MatrixXd>(transfer_npy.data.data(), reco_size, gen_size);
+    transfer_expanded.transposeInPlace();
 
     if (test){
         Eigen::VectorXd sumtransfer_R = transfer_expanded.rowwise().sum();

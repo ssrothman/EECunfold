@@ -1,0 +1,19 @@
+{
+    "systlist" : {
+        "scanMuon" : {
+            "source" : "/data/submit/srothman/EEC/Jul14_2024/DYJetsToLL_HT-0to70/EECproj/hists_file0to2052_tight_poissonbootstrap200_scanMuon.pkl",
+            "systs" : [
+                "wt_idsf",
+                "wt_triggersf",
+                "wt_prefire",
+                "wt_isosf"
+            ]
+        }
+    },
+    "normtype" : {
+        "wt_idsf" : "kinematic",
+        "wt_triggersf" : "kinematic",
+        "wt_prefire" : "kinematic",
+        "wt_isosf" : "kinematic"
+    }
+}

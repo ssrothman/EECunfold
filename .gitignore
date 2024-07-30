@@ -5,3 +5,5 @@ unfolded.npy
 covunfolded.npy
 transfer_over_gen.npy
 forward.npy
+*.npy
+*.pyc
