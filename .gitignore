@@ -7,3 +7,5 @@ transfer_over_gen.npy
 forward.npy
 *.npy
 *.pyc
+*.pkl
+run_unfolding
