@@ -23,7 +23,7 @@ def lsq_np(truth, chi, kappas, gamma, Nbeta):
     beta = truth[:Nbeta]
     theta = truth[Nbeta:]
 
-    K = np.empty_like(chi)
+    K = np.zeros_like(chi)
     for i in range(len(theta)):
         K += theta[i] * kappas[i]
     #K = np.einsum('i,ijk->jk', theta, kappas)
@@ -32,12 +32,24 @@ def lsq_np(truth, chi, kappas, gamma, Nbeta):
 
     residuals = T @ beta - gamma
 
-    loss = 0.5 * (np.sum(np.square(residuals)) + np.sum(np.square(theta)))
+    loss = 0.5 * np.sum(np.square(residuals))
+    loss += 0.5 * np.sum(np.square(theta))
 
-    grad = np.empty_like(truth)
+    grad = np.zeros_like(truth)
     grad[:Nbeta] = T.T @ residuals
     for i in range(len(theta)):
         grad[Nbeta+i] = theta[i] + (T @ beta - gamma).T @ (kappas[i] @ beta)
+
+    #print("any nan?")
+    #print("\ttruth", np.any(np.isnan(truth)))
+    #print("\tchi", np.any(np.isnan(chi)))
+    #print("\tkappas", np.any(np.isnan(kappas)))
+    #print("\tgamma", np.any(np.isnan(gamma)))
+    #print("\tNbeta", np.any(np.isnan(Nbeta)))
+    #print("\tK", np.any(np.isnan(K)))
+    #print("\tT", np.any(np.isnan(T)))
+    #print("\tresiduals", np.any(np.isnan(residuals)))
+    #print("\tloss", np.any(np.isnan(loss)))
 
     return (loss, grad)
 
@@ -52,7 +64,7 @@ def lsq_hess(truth, chi, kappas, gamma, Nbeta):
 
     '''
 
-    hess = np.empty((len(truth), len(truth)))
+    hess = np.zeros((len(truth), len(truth)))
 
     hess[:Nbeta, :Nbeta] = chi.T @ chi
     hess[Nbeta:, Nbeta:] = np.eye(len(theta))
@@ -60,7 +72,7 @@ def lsq_hess(truth, chi, kappas, gamma, Nbeta):
         for j in range(len(theta)):
             hess[Nbeta+i, Nbeta+j] = (kappas[i] @ beta).T @ (kappas[j] @ beta)
 
-    K = np.empty_like(chi)
+    K = np.zeros_like(chi)
     for i in range(len(theta)):
         K += theta[i] * kappas[i]
 
@@ -74,7 +86,7 @@ def lsq_hess(truth, chi, kappas, gamma, Nbeta):
     return hess
 
 def build_likelihood(nom, systs, data,
-                     EPS=1.0e-4,
+                     EPS=1.0e+2,
                      force_nonsingular=False,
                      dochecks=True,
                      usetorch=True):
@@ -107,14 +119,38 @@ def build_likelihood(nom, systs, data,
     print(C.shape)
     print(C)
 
-    L = scipy.linalg.cholesky(C, lower=True)
-    gamma = scipy.linalg.solve(L, y)
-    chi = scipy.linalg.solve(L, X)
+    import eigenpy as eigen
+    llt = eigen.LLT(C)
+    if (llt.info() != eigen.eigenpy_pywrap.ComputationInfo.Success):
+        print("WARNING: Cholesky decomposition failed")
+        print("INFO: ", llt.info())
+        raise ValueError("Cholesky decomposition failed with info {}".format(llt.info()))
+
+    L = llt.matrixL()
+
+    orthoL = eigen.CompleteOrthogonalDecomposition(L)
+    if (orthoL.info() != eigen.eigenpy_pywrap.ComputationInfo.Success):
+        print("WARNING: Orthogonal decomposition failed")
+        print("INFO: ", orthoL.info())
+        raise ValueError("Orthogonal decomposition failed with info {}".format(orthoL.info()))
+
+    gamma = orthoL.solve(y)
+    chi = orthoL.solve(X)
+    
+
+    #L = scipy.linalg.cholesky(C, lower=True)
+
+    #gamma = scipy.linalg.solve(L, y)
+    #chi = scipy.linalg.solve(L, X)
+    
+    #print(np.allclose(L, L1))
+    #print(np.allclose(gamma, gamma1))
+    #print(np.allclose(chi, chi1))
 
     if len(Ks) > 0:
         kappas = []
         for K in Ks:
-            kappa = scipy.linalg.solve(L, K)
+            kappa = orthoL.solve(K)
             kappas.append(kappa[None,:,:])
         kappas = np.concatenate(kappas, axis=0)
     else:
@@ -124,12 +160,11 @@ def build_likelihood(nom, systs, data,
         #test linalg solve...
         Xtest = L @ chi
         ytest = L @ gamma
-        if len(kappas) > 0:
-            Ktest = L @ kappas[0]
-        print("linalg solve closes? (x3)")
+        print("inversion closes? (x3)")
         print(np.allclose(Xtest, X))
         print(np.allclose(ytest, y))
         if len(kappas) > 0:
+            Ktest = L @ kappas[0]
             print(np.allclose(Ktest, Ks[0]))
 
     Nbeta = nom['gen'].shape[0]
@@ -142,7 +177,7 @@ def build_likelihood(nom, systs, data,
                             torch.Tensor(gamma.astype(np.float32)).cuda(), 
                             Nbeta)
     else:
-        @numba.jit(nopython=True)
+        #@numba.jit(nopython=True)
         def thefunc(truth):
             return lsq_np(truth, chi, kappas, gamma, Nbeta)
         
@@ -150,7 +185,12 @@ def build_likelihood(nom, systs, data,
         def thehess(truth):
             return lsq_hess(truth, chi, kappas, gamma, Nbeta)
 
-    initialguess, _, _, _ = scipy.linalg.lstsq(chi, gamma)
+    
+    orthoChi = eigen.CompleteOrthogonalDecomposition(chi)
+    print(orthoChi.info())
+    initialguess = orthoChi.solve(gamma)
+
+    #initialguess, _, _, _ = scipy.linalg.lstsq(chi, gamma)
     print(initialguess.shape)
 
     if dochecks:
@@ -161,6 +201,19 @@ def build_likelihood(nom, systs, data,
     initialguess = np.concatenate([initialguess, initialtheta])
 
     #initialguess += np.random.random(initialguess.shape) * 0.1
+
+    print("C")
+    print("\tmax",np.max(C))
+    print("\tmin",np.min(C))
+    print("chi")
+    print("\tmax",np.max(chi))
+    print("\tmin",np.min(chi))
+    print("gamma")
+    print("\tmax",np.max(gamma))
+    print("\tmin",np.min(gamma))
+    print("intialguess")
+    print("\tmax",np.max(initialguess))
+    print("\tmin",np.min(initialguess))
 
     if usetorch:
         initialguess = torch.Tensor(initialguess.astype(np.float32)).cuda()

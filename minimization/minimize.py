@@ -1,16 +1,16 @@
 import pickle
 import matplotlib.pyplot as plt
 
-with open("test5/hists_file0to1_tight_poissonbootstrap200_noSyst.pkl", 'rb') as f:
+with open("test6/hists_file0to3018_tight_manualcov_noSyst.pkl", 'rb') as f:
     hists = pickle.load(f)
 
 print(hists.keys())
 
 from preprocess import get_arrays
 
-restrictorder = (0)
+restrictorder = None
 restrictpt = None #tuple(range(10))
-restrictbtag = "sum"
+restrictbtag = None
 
 nom = get_arrays(hists, 'nominal', None,
                  restrictorder=restrictorder,
@@ -43,6 +43,11 @@ ELL, p0, HESS = build_likelihood(nom,
                                   #(id_up, id_down)], 
                                  nom,
                                  usetorch=False)
+
+from manual_newton import manual_newton
+
+manual_newton(ELL, p0, HESS)
+aflksadfjklfasd
 
 import numpy as np
 import matplotlib.pyplot as plt

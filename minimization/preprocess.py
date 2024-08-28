@@ -20,6 +20,8 @@ def reshapetransfer(x):
 
     transfer = np.einsum('abcjkld,ai->bcadjkil', x, diagorder, 
                          optimize=True)
+    #transfer = np.einsum('abcld,ai->bcadil', x, diagorder, 
+    #                     optimize=True)
     
     return transfer
 
@@ -179,6 +181,12 @@ def get_arrays(hists, syst, statsplit,
         reco = reco[restrictbtag,:,:,:]
         covreco = covreco[restrictbtag,:,:,:,:,:,:,:]
         covreco = covreco[:,:,:,:,restrictbtag,:,:,:]
+    
+    gen = np.sum(gen, axis=0)
+    reco = np.sum(reco, axis=0)
+
+    covgen = np.sum(covgen, axis=(0,4))
+    covreco = np.sum(covreco, axis=(0,4))
 
     print("in the end the shapes are")
     print("gen", gen.shape)
