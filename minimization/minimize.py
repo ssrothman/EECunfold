@@ -9,7 +9,7 @@ print(hists.keys())
 from preprocess import get_arrays
 
 restrictorder = None
-restrictpt = None #tuple(range(10))
+restrictpt = 'sum' #tuple(range(10))
 restrictbtag = None
 
 nom = get_arrays(hists, 'nominal', None,
@@ -44,56 +44,56 @@ ELL, p0, HESS = build_likelihood(nom,
                                  nom,
                                  usetorch=False)
 
-from manual_newton import manual_newton
-
-manual_newton(ELL, p0, HESS)
-aflksadfjklfasd
-
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
-sum1 = np.sum(nom['transfer'], axis=1)
-sum0 = np.sum(nom['transfer'], axis=0)
-diag = np.diag(nom['transfer'])
-plt.plot(diag/sum0)
-plt.plot(diag/sum1)
-plt.show()
+#sum1 = np.sum(nom['transfer'], axis=1)
+#sum0 = np.sum(nom['transfer'], axis=0)
+#diag = np.diag(nom['transfer'])
+#plt.plot(diag/sum0)
+#plt.plot(diag/sum1)
+#plt.show()
 
+from manual_newton import manual_newton
 
 H0 = HESS(p0)
 print("Condition number of H0", np.linalg.cond(H0))
 print("Largers eigenvalue of H0", np.max(np.linalg.eigvals(H0)))
 print("Smallest eigenvalue of H0", np.min(np.linalg.eigvals(H0)))
 
-plt.pcolormesh(H0, norm=LogNorm())
-plt.colorbar()
-plt.show()
-#H0 = HESS(p0)
-#print("Condition number of H0", np.linalg.cond(H0))
-#from torchimize.functions.single.gda_fun_single import gradient_descent
-#print("running gradient descent")
-#popt = gradient_descent(p0, ELL)
-#print("DONE")
-#popt = popt.detach().numpy()
-#print(scipy.linalg.norm(popt - p0.detach().numpy()))
-
-import scipy.optimize
-print("running minimization with scipy")
-res = scipy.optimize.minimize(ELL, p0,
-                             jac=True,
-                             options = {
-                                 'disp' : True
-                                 },
-                             hess=HESS, 
-                             method="Newton-CG")
-print("DONE")
-
-import scipy.linalg
-print(res)
-print("result distance", scipy.linalg.norm(res.x - p0))
-
-
-print('predicted nuisances:\n', res.x[-2:])
-hess = HESS(res.x)
-cov = scipy.linalg.pinv(hess)
-print('predicted cov\n', cov[-2:,-2:])
+fval, ans = manual_newton(ELL, p0, HESS)
+print(ans)
+#``
+#``
+#``plt.pcolormesh(H0, norm=LogNorm())
+#``plt.colorbar()
+#``plt.show()
+#``#H0 = HESS(p0)
+#``#print("Condition number of H0", np.linalg.cond(H0))
+#``#from torchimize.functions.single.gda_fun_single import gradient_descent
+#``#print("running gradient descent")
+#``#popt = gradient_descent(p0, ELL)
+#``#print("DONE")
+#``#popt = popt.detach().numpy()
+#``#print(scipy.linalg.norm(popt - p0.detach().numpy()))
+#``
+#``import scipy.optimize
+#``print("running minimization with scipy")
+#``res = scipy.optimize.minimize(ELL, p0,
+#``                             jac=True,
+#``                             options = {
+#``                                 'disp' : True
+#``                                 },
+#``                             hess=HESS, 
+#``                             method="Newton-CG")
+#``print("DONE")
+#``
+#``import scipy.linalg
+#``print(res)
+#``print("result distance", scipy.linalg.norm(res.x - p0))
+#``
+#``
+#``print('predicted nuisances:\n', res.x[-2:])
+#``hess = HESS(res.x)
+#``cov = scipy.linalg.pinv(hess)
+#``print('predicted cov\n', cov[-2:,-2:])

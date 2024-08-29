@@ -36,6 +36,7 @@ def lsq_np(truth, chi, kappas, gamma, Nbeta):
     loss += 0.5 * np.sum(np.square(theta))
 
     grad = np.zeros_like(truth)
+
     grad[:Nbeta] = T.T @ residuals
     for i in range(len(theta)):
         grad[Nbeta+i] = theta[i] + (T @ beta - gamma).T @ (kappas[i] @ beta)
@@ -86,7 +87,7 @@ def lsq_hess(truth, chi, kappas, gamma, Nbeta):
     return hess
 
 def build_likelihood(nom, systs, data,
-                     EPS=1.0e+2,
+                     EPS=1.0e-5,
                      force_nonsingular=False,
                      dochecks=True,
                      usetorch=True):
@@ -100,7 +101,10 @@ def build_likelihood(nom, systs, data,
         baddiag = np.diag(C) == 0
         diag_x0, diag_x1 = np.diag_indices_from(C)
         C[diag_x0[baddiag], diag_x1[baddiag]] = 1
-    C += EPS * np.eye(C.shape[0])
+
+    #C += np.eye(C.shape[0]) * EPS
+    C = np.ones(C.shape) + np.eye(C.shape[0])
+    #C = np.eye(C.shape[0]) * np.square(data['reco'])
 
     #C = np.eye(C.shape[0])
 
@@ -169,6 +173,23 @@ def build_likelihood(nom, systs, data,
 
     Nbeta = nom['gen'].shape[0]
 
+    orthoChi = eigen.CompleteOrthogonalDecomposition(chi)
+    print(orthoChi.info())
+    initialguess = orthoChi.solve(gamma)
+
+    if dochecks:
+        print("norm of initialguess - truth",
+              scipy.linalg.norm(initialguess - data['gen']))
+
+    #redefine in terms of beta/guess
+    guessfactor = initialguess[:]
+    #guessfactor = orthoL.solve(guessfactor)
+    guessfactor[guessfactor == 0] = 1
+
+    chi = chi * guessfactor
+    for i in range(len(kappas)):
+        kappas[i] = kappas[i] * guessfactor
+
     if usetorch:
         def thefunc(truth):
             return lsq_torch(truth, 
@@ -186,16 +207,7 @@ def build_likelihood(nom, systs, data,
             return lsq_hess(truth, chi, kappas, gamma, Nbeta)
 
     
-    orthoChi = eigen.CompleteOrthogonalDecomposition(chi)
-    print(orthoChi.info())
-    initialguess = orthoChi.solve(gamma)
 
-    #initialguess, _, _, _ = scipy.linalg.lstsq(chi, gamma)
-    print(initialguess.shape)
-
-    if dochecks:
-        print("norm of initialguess - truth",
-              scipy.linalg.norm(initialguess - data['gen']))
     
     initialtheta = np.zeros(kappas.shape[0])
     initialguess = np.concatenate([initialguess, initialtheta])

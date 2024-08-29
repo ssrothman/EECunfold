@@ -24,5 +24,5 @@ def manual_newton(thefunc, initialguess, thehess):
         hess = thehess(initialguess)
         print("step", i, ":", fval)
 
-    return fval
+    return fval, initialguess
 
