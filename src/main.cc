@@ -7,13 +7,13 @@
 #include "setup_transfer.h"
 
 int main(){
-    npy::npy_data<double> reco = npy::read_npy<double>("data/reco.npy");
-    npy::npy_data<double> unmatchedReco = npy::read_npy<double>("data/unmatchedReco.npy");
-    npy::npy_data<double> untransferedReco = npy::read_npy<double>("data/untransferedReco.npy");
+    npy::npy_data<double> reco = npy::read_npy<double>("pythia_data/reco.npy");
+    npy::npy_data<double> unmatchedReco = npy::read_npy<double>("pythia_data/unmatchedReco.npy");
+    npy::npy_data<double> untransferedReco = npy::read_npy<double>("pythia_data/untransferedReco.npy");
 
     Eigen::VectorXd recoErr;
     Eigen::HouseholderQR<Eigen::MatrixXd> solver;
-    setup_transfer("data", solver, recoErr);
+    setup_transfer("herwig_data", solver, recoErr);
 
     printf("RUNNING TOYS\n");
     npy::npy_data<double> unfolded_npy;
@@ -36,5 +36,5 @@ int main(){
     printf("Total entries: %zu\n", unfolded_npy.data.size());
     printf("\t(dimension products: %zu)\n", product);
     printf("\n");
-    npy::write_npy("data/unfoldedToys.npy", unfolded_npy);
+    npy::write_npy("data/pythia_unfolded_with_herwig.npy", unfolded_npy);
 }
