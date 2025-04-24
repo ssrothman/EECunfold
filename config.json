@@ -1,0 +1,5 @@
+{
+    "reco_path" : "pythia_data/",
+    "transfer_path" : "pythia_data/",
+    "output_path" : "data/pythia_unf_pythia"
+}

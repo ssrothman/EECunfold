@@ -1,19 +1,29 @@
 #include <stdio.h>
-#include "npy.hpp"
+#include <npy.hpp>
 #include <numeric>
 #include <Eigen/Dense>
+#include <nlohmann/json.hpp>
 
 #include "unfold_toy.h"
 #include "setup_transfer.h"
 
+using json = nlohmann::json;
+
 int main(){
-    npy::npy_data<double> reco = npy::read_npy<double>("pythia_data/reco.npy");
-    npy::npy_data<double> unmatchedReco = npy::read_npy<double>("pythia_data/unmatchedReco.npy");
-    npy::npy_data<double> untransferedReco = npy::read_npy<double>("pythia_data/untransferedReco.npy");
+    std::ifstream json_file("config.json");
+    json config = json::parse(json_file);
+
+    std::string reco_path = config["reco_path"];
+    std::string transfer_path = config["transfer_path"];
+    std::string output_path = config["output_path"];
+
+    npy::npy_data<double> reco = npy::read_npy<double>(reco_path+"reco.npy");
+    npy::npy_data<double> unmatchedReco = npy::read_npy<double>(reco_path+"unmatchedReco.npy");
+    npy::npy_data<double> untransferedReco = npy::read_npy<double>(reco_path+"untransferedReco.npy");
 
     Eigen::VectorXd recoErr;
     Eigen::HouseholderQR<Eigen::MatrixXd> solver;
-    setup_transfer("herwig_data", solver, recoErr);
+    setup_transfer(transfer_path, solver, recoErr);
 
     printf("RUNNING TOYS\n");
     npy::npy_data<double> unfolded_npy;
@@ -26,15 +36,5 @@ int main(){
         unfold_toy(solver, reco, unmatchedReco, untransferedReco,
                    iToy, unfolded_npy);
     }
-    printf("unfolded_npy.shape = ");
-    size_t product=1;
-    for (size_t i = 0; i < unfolded_npy.shape.size(); ++i) {
-        printf("%zu ", unfolded_npy.shape[i]);
-        product *= unfolded_npy.shape[i];
-    }
-    printf("\n");
-    printf("Total entries: %zu\n", unfolded_npy.data.size());
-    printf("\t(dimension products: %zu)\n", product);
-    printf("\n");
-    npy::write_npy("data/pythia_unfolded_with_herwig.npy", unfolded_npy);
+    npy::write_npy(output_path + "unfolded.npy", unfolded_npy);
 }
