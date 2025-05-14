@@ -3,14 +3,23 @@ import datasets
 import os
 import pickle
 
-Htemplate = datasets.get_pickled_histogram(
+Htemplate_reco = datasets.get_pickled_histogram(
         "Apr_01_2025", "Pythia_inclusive", "EECres4tee",
         "nominal", "nominal", 
         "reco"
 )
+Htemplate_gen = datasets.get_pickled_histogram(
+        "Apr_01_2025", "Pythia_inclusive", "EECres4tee",
+        "nominal", "nominal", 
+        "gen"
+)
+Htemplate_transfer = datasets.get_pickled_histogram(
+        "Apr_01_2025", "Pythia_inclusive", "EECres4tee",
+        "nominal", "nominal", 
+        "transfer"
+)
 
 options = os.listdir("data")
-print(options)
 
 for option in options:
     if not option.endswith(".npy"):
@@ -22,7 +31,16 @@ for option in options:
 
     vals = np.load(os.path.join("data", option))
     vals[vals<=0] = 0
-    Hvals = Htemplate.copy().reset()
+    if 'transfer' in thename:
+        Hvals = Htemplate_transfer.copy().reset()
+    elif 'unfolded' in thename:
+        Hvals = Htemplate_gen.copy().reset()
+    elif 'forward' in thename:
+        Hvals = Htemplate_reco.copy().reset()
+    else:
+        print("Unknown type for "+thename)
+        continue
+
     Hvals += vals
 
     with open(os.path.join("data", thename+".pkl"), "wb") as f:

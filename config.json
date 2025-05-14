@@ -1,5 +1,7 @@
 {
-    "reco_path" : "pythia_data/",
+    "data_path" : "pythia_data/",
     "transfer_path" : "pythia_data/",
-    "output_path" : "data/pythia_unf_pythia"
+    "output_path" : "data/pythia_unf_pythia_",
+    "unfold" : true,
+    "forwardfold" : true
 }
