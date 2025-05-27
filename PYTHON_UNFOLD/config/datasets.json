@@ -1,0 +1,191 @@
+{
+    "DatasetsGENONLY" : {
+        "herwig_q_TeV" : {
+            "tag" : "herwig_q_TeV",
+            "label" : "Herwig $Z+q$",
+            "color" : "blue"
+        },
+        "herwig_q_TeV_nospin" : {
+            "tag" : "herwig_q_TeV_nospin",
+            "label" : "Herwig $Z+q$ (no spin corr.)",
+            "color" : "red"
+        },
+        "herwig_q_TeV_nogg" : {
+            "tag" : "herwig_q_TeV_nogg",
+            "label" : "Herwig $Z+q$ (no $g\\rightarrow gg$)",
+            "color" : "orange"
+        },
+        "herwig_q_TeV_nospin_nogg" : {
+            "tag" : "herwig_q_TeV_nospin_nogg",
+            "label" : "Herwig $Z+q$ (no spin corr.; no $g\\rightarrow gg$)",
+            "color" : "purple"
+        }
+    },
+    "DatasetsDATA" : {
+        "DATA_2018A" : {
+            "tag" : "DATA_2018A",
+            "label" : "2018A",
+            "color" : "black",
+            "lumi" : 14.018038324
+        },
+        "DATA_2018B" : {
+            "tag" : "DATA_2018B",
+            "label" : "2018B",
+            "color" : "black",
+            "lumi" : 7.060668850
+        },
+        "DATA_2018C" : {
+            "tag" : "DATA_2018C",
+            "label" : "2018C",
+            "color" : "black",
+            "lumi" : 6.894808938
+        },
+        "DATA_2018D" : {
+            "tag" : "DATA_2018D",
+            "label" : "2018D",
+            "color" : "black",
+            "lumi" : 31.833472186
+        }
+    },
+    "DatasetsMC" : {
+        "Pythia_inclusive" : {
+            "tag" : "Pythia_inclusive",
+            "label" : "HT-inclusive Pythia",
+            "color": "blue",
+            "xsec" : 6077.22
+        },
+        "Herwig_inclusive" : {
+            "tag" : "Herwig_inclusive",
+            "label" : "HT-inclusive Herwig",
+            "color": "red",
+            "xsec" : 6077.22
+        },
+        "Pythia_HT-0to70" : {
+            "tag" : "Pythia_HT-0to70",
+            "label" : "Pythia; 0 < HT [GeV] < 70",
+            "color": "green",
+            "xsec" : 6077.2
+        },
+        "Pythia_HT-70to100" : {
+            "tag" : "Pythia_HT-70to100",
+            "label" : "Pythia; 70 < HT [GeV] < 100",
+            "color": "orange",
+            "xsec" : 159.1
+        },
+        "Pythia_HT-100to200" : {
+            "tag" : "Pythia_HT-100to200",
+            "label" : "Pythia; 100 < HT [GeV] < 200",
+            "color": "purple",
+            "xsec" : 159.4
+        },
+        "Pythia_HT-200to400" : {
+            "tag" : "Pythia_HT-200to400",
+            "label" : "Pythia; 200 < HT [GeV] < 400",
+            "color": "cyan",
+            "xsec" : 43.68
+        },
+        "Pythia_HT-400to600" : {
+            "tag" : "Pythia_HT-400to600",
+            "label" : "Pythia; 400 < HT [GeV] < 600",
+            "color": "magenta",
+            "xsec" : 5.926
+        },
+        "Pythia_HT-600to800" : {
+            "tag" : "Pythia_HT-600to800",
+            "label" : "Pythia; 600 < HT [GeV] < 800",
+            "color": "brown",
+            "xsec" : 1.439
+        },
+        "Pythia_HT-800to1200" : {
+            "tag" : "Pythia_HT-800to1200",
+            "label" : "Pythia; 800 < HT [GeV] < 1200",
+            "color": "pink",
+            "xsec" : 0.6462
+        },
+        "Pythia_HT-1200to2500" : {
+            "tag" : "Pythia_HT-1200to2500",
+            "label" : "Pythia; 1200 < HT [GeV] < 2500",
+            "color": "gray",
+            "xsec" : 0.1516
+        },
+        "Pythia_HT-2500toInf" : {
+            "tag" : "Pythia_HT-2500toInf",
+            "label" : "Pythia; 2500 < HT [GeV]",
+            "color": "black",
+            "xsec" : 0.003395
+        },
+        "ZZ" : {
+            "tag" : "ZZ",
+            "label" : "ZZ",
+            "color" : "yellow",
+            "xsec" : 16.523
+        },
+        "WZ" : {
+            "tag" : "WZ",
+            "label" : "WZ",
+            "color" : "chocolate",
+            "xsec" : 47.13
+        },
+        "WW" : {
+            "tag" : "WW",
+            "label" : "WW",
+            "color" : "darkred",
+            "xsec" : 118.7
+        },
+        "TT" : {
+            "tag" : "TT",
+            "label" : "TT",
+            "color" : "sandybrown",
+            "xsec" : 89.51
+        }, 
+        "ST_t" : {
+            "tag" : "ST_t",
+            "label" : "t-channel single top",
+            "color" : "darkblue",
+            "xsec" : 134.2
+        }, 
+        "ST_t_anti" : {
+            "tag" : "ST_t_anti",
+            "label" : "t-channel single antitop",
+            "color" : "lightblue",
+            "xsec" : 80.0
+        },
+        "ST_tW" : {
+            "tag" : "ST_tW",
+            "label" : "Single tW",
+            "xsec" : 39.65,
+            "color" : "lightgreen"
+        },
+        "ST_tW_anti" : {
+            "tag" : "ST_tW_anti",
+            "label": "Single anti-tW",
+            "xsec" : 39.65,
+            "color": "darkgreen"
+        }
+    },
+    "StacksMC" : {
+        "HT" : {
+            "tag" : "HT",
+            "dsets" : ["Pythia_HT-0to70", "Pythia_HT-70to100", "Pythia_HT-100to200", "Pythia_HT-200to400", "Pythia_HT-400to600", "Pythia_HT-600to800", "Pythia_HT-800to1200", "Pythia_HT-1200to2500", "Pythia_HT-2500toInf"],
+            "stacks" : [],
+            "global_label" : "HT-binned Pythia",
+            "global_color" : "blue"
+        },
+        "allMC" : {
+            "tag" : "allMC",
+            "dsets" : ["ZZ", "WZ", "WW", "TT", "ST_t", "ST_t_anti", "ST_tW", "ST_tW_anti"],
+            "stacks" : ["HT"],
+            "global_label" : "All MC samples",
+            "global_color" : "orange"
+        }
+    },
+    "StacksDATA" : {
+        "allDATA" : {
+            "tag" : "allDATA",
+            "dsets" : ["DATA_2018A", "DATA_2018B", "DATA_2018C", "DATA_2018D"],
+            "stacks" : [],
+            "global_label" : "2018UL DATA",
+            "global_color" : "black"
+        }
+    }
+}
