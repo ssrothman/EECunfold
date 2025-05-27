@@ -7,82 +7,110 @@ import torchmin
 import torch
 import loss
 
-def demo(Htransfer, 
-         Hgen, HunmatchedGen, HuntransferedGen, 
-         Hreco, HunmatchedReco, HuntransferedReco, 
-         iboot=0, LossClass='Simplest',
-         method='scan', x0=None):
+#cut = {'pt' : slice(None,None,sum)}
+#tcut = {'pt_reco' : slice(None,None,sum), 'pt_gen' : slice(None,None,sum)}
 
-    Hgenpure = Hgen - HunmatchedGen - HuntransferedGen
-    Hrecopure = Hreco - HunmatchedReco - HuntransferedReco
+cut = {}
+tcut = {}
 
-    #Htransfer = Htransfer[{'pt_gen' : slice(None,None,sum),
-    #                     'pt_reco' : slice(None,None,sum)}]
-    #Hgenpure = Hgenpure[{'pt' : slice(None,None,sum)}]
-    #Hrecopure = Hrecopure[{'pt' : slice(None,None,sum)}]
-    #Hgen = Hgen[{'pt' : slice(None,None,sum)}]
-    #Hreco = Hreco[{'pt' : slice(None,None,sum)}]
+def setup_loss(histdict):
+    #nominal
+    Htransfer = histdict['transfer']['nominal']
+    Hgen = histdict['gen']['nominal']
+    HgenBkg = histdict['unmatchedGen']['nominal'] + histdict['untransferedGen']['nominal']
+    Hreco = histdict['reco']['nominal']
+    HrecoBkg = histdict['unmatchedReco']['nominal'] + histdict['untransferedReco']['nominal']
 
-    transfer = torch.from_numpy(Htransfer.values(flow=True))
+    Htransfer = Htransfer[tcut]
+    Hgen = Hgen[cut]
+    HgenBkg = HgenBkg[cut]
+    Hreco = Hreco[cut]
+    HrecoBkg = HrecoBkg[cut]
 
-    genpure = torch.from_numpy(Hgenpure[{'bootstrap' : iboot}].values(flow=True).ravel())
-    recopure = torch.from_numpy(Hrecopure[{'bootstrap' : iboot}].values(flow=True).ravel())
+    reco0 = Hreco[{'bootstrap' : 0}].values(flow=True).ravel()
+    gen0 = Hgen[{'bootstrap' : 0}].values(flow=True).ravel()
+    recoBkg0 = HrecoBkg[{'bootstrap' : 0}].values(flow=True).ravel()
+    genBkg0 = HgenBkg[{'bootstrap' : 0}].values(flow=True).ravel()
+    transfer0 = Htransfer.values(flow=True).reshape((*reco0.shape, *gen0.shape))
 
-    gen = torch.from_numpy(Hgen[{'bootstrap' : iboot}].values(flow=True).ravel())
-    reco = torch.from_numpy(Hreco[{'bootstrap' : iboot}].values(flow=True).ravel())
+    transfer0 = np.nan_to_num(transfer0 / (gen0 - genBkg0)[None, :])
 
-    gamma0 = (gen-genpure) / gen
-    rho0 = (reco - recopure) / recopure
-    gammaErr = gamma0/20
-    rhoErr = rho0/20
+    transferVariations = []
+    for key in histdict['transfer']:
+        if key == 'nominal':
+            continue
+        up = histdict['transfer'][key][0][tcut].values(flow=True).reshape((*reco0.shape, *gen0.shape))
+        dn = histdict['transfer'][key][1][tcut].values(flow=True).reshape((*reco0.shape, *gen0.shape))
 
-    #bootstrap dimension has under/overflow that we don't want
-    genshape = np.prod(gen.shape)
-    recoshape = np.prod(reco.shape)
+        genUp = histdict['gen'][key][0][{'bootstrap' : 0}][cut].values(flow=True).ravel()
+        genDn = histdict['gen'][key][1][{'bootstrap' : 0}][cut].values(flow=True).ravel()
 
-    gen = torch.reshape(gen, (-1,))
-    reco = torch.reshape(reco, (-1,))
-    transfer = torch.reshape(transfer, (recoshape, genshape))
+        genBkgUp = (histdict['unmatchedGen'][key][0] + histdict['untransferedGen'][key][0])[{'bootstrap' : 0}][cut].values(flow=True).ravel()
+        genBkgDn = (histdict['unmatchedGen'][key][1] + histdict['untransferedGen'][key][1])[{'bootstrap' : 0}][cut].values(flow=True).ravel()
 
-    recoerr = torch.from_numpy(unc.unc(Hreco).ravel())
+        up = np.nan_to_num(up / (genUp - genBkgUp)[None, :])
+        dn = np.nan_to_num(dn / (genDn - genBkgDn)[None, :])
 
-    transfer /= gen[None,:]
-    if 'FullModel' in LossClass:
-        t2 = torch.zeros_like(transfer)
-        t2 = torch.diagonal_scatter(t2, torch.ones(transfer.shape[0])*2e-3)
-        t2 = torch.diagonal_scatter(t2, torch.ones(transfer.shape[0]-1)*(1e-3), offset=1)
-        t2 = torch.diagonal_scatter(t2, torch.ones(transfer.shape[0]-1)*(1e-3), offset=-1)
-        t3 = torch.zeros_like(transfer)
-        t3 = torch.diagonal_scatter(t3, torch.ones(transfer.shape[0]-1)*1e-3, offset=1)
-        t3 = torch.diagonal_scatter(t3, torch.ones(transfer.shape[0]-1)*(-1e-3), offset=-1)
-        transfer = torch.cat((transfer[None,:,:], t2[None,:,:], t3[None,:,:]), dim=0)
+        transferVariations.append(up - dn)
 
-    #run on GPU
-    reco = reco.cuda()
-    recoerr = recoerr.cuda()
-    transfer = transfer.cuda()
-    gamma0 = gamma0.cuda()
-    gammaErr = gammaErr.cuda()
-    rho0 = rho0.cuda()
-    rhoErr = rhoErr.cuda()
+    gamma0 = np.nan_to_num(genBkg0 / gen0)
+    rho0 = np.nan_to_num(recoBkg0 / (reco0 - recoBkg0))
 
-    if isinstance(LossClass, str):
-        if LossClass != "SimpleFullModelFullTemplate":
-            LossClass = loss.losses[LossClass]()
-            theloss = lambda x : LossClass.loss(x, transfer, reco, recoerr)
-        else:
-            LossClass = loss.SimpleFullModelFullTemplateLoss(transfer, 
-                                                             gamma0, 
-                                                             gammaErr, 
-                                                             rho0, rhoErr).cuda()
-            theloss = LossClass.one_parameter_loss(reco, recoerr)
+    gammaVariations = []
+    rhoVariations = []
+
+    nboot = Hreco.axes['bootstrap'].size - 1
+    for iboot in range(nboot):
+        reco_i = Hreco[{'bootstrap' : iboot+1}].values(flow=True).ravel()
+        recoBkg_i = HrecoBkg[{'bootstrap' : iboot+1}].values(flow=True).ravel()
+        gen_i = Hgen[{'bootstrap' : iboot+1}].values(flow=True).ravel()
+        genBkg_i = HgenBkg[{'bootstrap' : iboot+1}].values(flow=True).ravel()
+
+        gamma_i = np.nan_to_num(genBkg_i / gen_i)
+        rho_i = np.nan_to_num(recoBkg_i / (reco_i - recoBkg_i))
+
+        gammaVariations.append((gamma_i - gamma0)/nboot)
+        rhoVariations.append((rho_i - rho0)/nboot)
+
+    transferVariations = np.asarray(transferVariations)
+    gammaVariations = np.asarray(gammaVariations)
+    rhoVariations = np.asarray(rhoVariations)
+
+    print("reco0: ", reco0.shape)
+    print("gen0: ", gen0.shape)
+
+    print("gamma0: ", gamma0.shape)
+    print("rho0: ", rho0.shape)
+
+    print("transfer0: ", transfer0.shape)
+    print()
+    print("gammaVariations", gammaVariations.shape)
+    print("rhoVariations", rhoVariations.shape)
+    print("transferVariations", transferVariations.shape)
+
+    LOSS = loss.FullLoss(transfer0, transferVariations, 
+                         gamma0, gammaVariations, 
+                         rho0, rhoVariations)
+
+    torch.set_default_dtype(torch.float64)
+
+    return LOSS
+
+def run_minimization(Hreco, LOSS, iboot=0, 
+                     method='scan', x0=None,
+                     compute_hessian=False,
+                     **kwargs):
+
+    reco = Hreco[cut][{'bootstrap' : iboot}].values(flow=True).ravel()
+    recoErr = unc.unc(Hreco[cut]).ravel()
+
+    reco = torch.from_numpy(reco)
+    recoErr = torch.from_numpy(recoErr)
 
     if x0 is None:
-        x0 = torch.ones_like(gen).cuda()
-        t0 = torch.zeros(LossClass.nNuisances(), dtype=gen.dtype).cuda()
+        x0 = torch.ones(LOSS.nBeta)
+        t0 = torch.zeros(LOSS.nNuisances())
         x0 = torch.cat((x0, t0), dim=0)
-
-    x0 = x0.cuda()
 
     if method == 'scan':
         methodlist = ['bfgs', 'l-bfgs', 'cg', 'newton-cg', 'newton-exact', 
@@ -90,18 +118,29 @@ def demo(Htransfer,
     else:
         methodlist = [method]
         
+    LOSS = LOSS.cuda()
+    reco = reco.cuda()
+    recoErr = recoErr.cuda()
+    theloss = LOSS.one_parameter_loss(reco, recoErr)
+    x0 = x0.cuda()
+
     for method in methodlist:
         try:
             from time import time
-            t0 = time()
-            res = torchmin.minimize(theloss, x0 = x0,
-                                    method = method)
             print(method)
+            print("starting minimization")
+            print("initial loss = %g"%theloss(x0).item())
+            t0 = time()
+            res = torchmin.minimize(
+                    theloss, x0 = x0,
+                    method = method,
+                    callback = lambda x : print("LOSS:", theloss(x).item()),
+                    options = kwargs,
+            )
             print("\tt =", time()-t0)
             print("\tSuccess: ", res.success)
             print("\tStatus: ", res.status)
             print("\tMessage: ", res.message)
-            print("\tunfolded == genpure?", np.allclose(res.x.cpu()[:-LossClass.nNuisances()]*reco.cpu(), gen.cpu()))
             print("\tL = %g"%res.fun.cpu().detach().item())
         except Exception as e:
             print(f"Method {method} failed with error: {e}")
@@ -110,4 +149,7 @@ def demo(Htransfer,
             #traceback.print_exc()
             continue
 
-    return res, gen, reco, transfer
+    if compute_hessian:
+        res.hess = torch.autograd.functional.hessian(theloss, res.x, vectorize=False)
+
+    return res

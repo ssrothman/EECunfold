@@ -72,7 +72,8 @@ def get_unfolded_histogram(name):
     with open(os.path.join(unf_basedir, name+'.pkl'), 'rb') as f:
         return pickle.load(f)
 
-def get_pickled_histogram(runtag, tag, skimmer, objsyst, wtsyst, whichobj):
+def get_pickled_histogram(runtag, tag, skimmer, objsyst, wtsyst, whichobj,
+                          statN=-1, statK=-1):
     thepath = os.path.join(basedir, runtag, tag, skimmer)
 
     subpaths = os.scandir(thepath)
@@ -104,7 +105,10 @@ def get_pickled_histogram(runtag, tag, skimmer, objsyst, wtsyst, whichobj):
         if subpath.is_dir():
             continue
         if subpath.name.startswith("%s_%s_%s"%(whichobj, objsyst, wtsyst)) and 'skipNominal' not in subpath.name:
-            options.append(subpath.name)
+            if statN > 0 and "%dstat%d"%(statN, statK) in subpath.name:
+                options.append(subpath.name)
+            elif statN <=0 and 'stat' not in subpath.name:
+                options.append(subpath.name)
 
     if (len(options) == 1):
         print()
@@ -144,9 +148,6 @@ def get_pickled_histogram(runtag, tag, skimmer, objsyst, wtsyst, whichobj):
 
         used_rngs = []
         used_rngs.append(int(re.search(r'rng(\d+)', options[choice]).group(1)))
-
-        print("firstN = %d" % firstN)
-        print("used_rngs = %s" % used_rngs)
 
         for subpath in os.scandir(thepath):
             if subpath.is_dir():

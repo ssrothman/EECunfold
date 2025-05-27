@@ -181,12 +181,12 @@ class FullLoss:
     TODO: is the 1/2 correct?
     '''
     def __init__(self, transfer0, transferVariations, gamma0, gammaVariations, rho0, rhoVariations):
-        self.transfer0 = transfer0
-        self.transferVariations = transferVariations
-        self.gamma0 = gamma0
-        self.gammaVariations = gammaVariations
-        self.rho0 = rho0
-        self.rhoVariations = rhoVariations
+        self.transfer0 = torch.from_numpy(transfer0)
+        self.transferVariations = torch.from_numpy(transferVariations)
+        self.gamma0 = torch.from_numpy(gamma0)
+        self.gammaVariations = torch.from_numpy(gammaVariations)
+        self.rho0 = torch.from_numpy(rho0)
+        self.rhoVariations = torch.from_numpy(rhoVariations)
 
         self.nGamma = gammaVariations.shape[0]
         self.nRho = rhoVariations.shape[0]
@@ -199,17 +199,17 @@ class FullLoss:
         print("nRho:", self.nRho)
 
     def genBkg(self, beta, gamma):
-        G = self.gamma0 + torch.tensordot(gamma, self.gammaVariations, TODO)
+        G = self.gamma0 + torch.tensordot(gamma, self.gammaVariations, 1)
         return G * beta
 
     def recoBkg(self, p, rho):
-        R = self.rho0 + torch.tensordot(rho, self.rhoVariations, TODO)
+        R = self.rho0 + torch.tensordot(rho, self.rhoVariations, 1)
         return R * p
 
     def forward(self, beta, theta, gamma, rho):
         genpure = beta - self.genBkg(beta, gamma)
 
-        thetransfer = self.transfer0 + torch.tensordot(theta, self.transferVariations, TODO)
+        thetransfer = self.transfer0 + torch.tensordot(theta, self.transferVariations, 1)
 
         p = torch.matmul(thetransfer, genpure)
 
@@ -228,17 +228,19 @@ class FullLoss:
         return 0.5 * (errTerm + cstrTerm)
 
     def one_parameter_loss(self, reco, recoErr):
-        return lambda x: self.loss(x, reco, recoErr)
+        theerr = torch.where(recoErr == 0, 1, recoErr)
+        return lambda x: self.loss(x, reco, theerr)
 
     def nNuisances(self):
         return self.nGamma + self.nRho + self.nTheta
 
     def cuda(self):
-        self.transfer = self.transfer.cuda()
+        self.transfer0 = self.transfer0.cuda()
         self.gamma0 = self.gamma0.cuda()
-        self.gammaErr = self.gammaErr.cuda()
         self.rho0 = self.rho0.cuda()
-        self.rhoErr = self.rhoErr.cuda()
+        self.transferVariations = self.transferVariations.cuda()
+        self.gammaVariations = self.gammaVariations.cuda()
+        self.rhoVariations = self.rhoVariations.cuda()
 
         return self
 
