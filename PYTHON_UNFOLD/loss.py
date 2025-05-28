@@ -180,7 +180,7 @@ class FullLoss:
     L = 1/2 (reco_pred - reco_true)^2 / reco_uncertainty^2 + 1/2 sum_i (nuisance_i)^2
     TODO: is the 1/2 correct?
     '''
-    def __init__(self, transfer0, transferVariations, gamma0, gammaVariations, rho0, rhoVariations):
+    def __init__(self, transfer0, transferVariations, gamma0, gammaVariations, rho0, rhoVariations, covmatrix = False):
         self.transfer0 = torch.from_numpy(transfer0)
         self.transferVariations = torch.from_numpy(transferVariations)
         self.gamma0 = torch.from_numpy(gamma0)
@@ -193,10 +193,13 @@ class FullLoss:
         self.nTheta = transferVariations.shape[0]
         self.nBeta = transfer0.shape[1]
 
+        self.covmatrix = covmatrix
+
         print("nBeta:", self.nBeta)
         print("nTheta:", self.nTheta)
         print("nGamma:", self.nGamma)
         print("nRho:", self.nRho)
+        print("Expecting inverse covariance matrix?", self.covmatrix)
 
     def genBkg(self, beta, gamma):
         G = self.gamma0 + torch.tensordot(gamma, self.gammaVariations, 1)
@@ -223,7 +226,11 @@ class FullLoss:
 
         fwd = self.forward(beta*reco, theta, gamma, rho)
 
-        errTerm = torch.sum(torch.square((fwd-reco) / recoErr))
+        if self.covmatrix:
+            diff = fwd-reco
+            errTerm = diff.T @ recoErr @ diff
+        else:
+            errTerm = torch.sum(torch.square((fwd-reco) / recoErr))
         cstrTerm = torch.sum(torch.square(x[self.nBeta:]))
         return 0.5 * (errTerm + cstrTerm)
 

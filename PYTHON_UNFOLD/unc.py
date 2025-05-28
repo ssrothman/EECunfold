@@ -7,5 +7,23 @@ def unc(H):
     for i in range(1, H.axes['bootstrap'].size):
         err2 += np.square((H[{'bootstrap' : i}] - nominal).values(flow=True))
     
-    return np.sqrt(err2 / (H.axes['bootstrap'].size - 1))
+    return (np.sqrt(err2 / (H.axes['bootstrap'].size - 1))).ravel()
 
+def cov(H):
+    nominal = H[{'bootstrap' : 0}].values(flow=True)
+
+    shape = nominal.shape
+    Nval = np.prod(shape)
+
+    nominal = nominal.ravel()
+
+    cov = np.zeros((Nval, Nval))
+
+    for i in range(1, H.axes['bootstrap'].size):
+        var = H[{'bootstrap' : i}].values(flow=True).ravel()
+        diff = var - nominal
+        cov += np.outer(diff, diff)
+    
+    cov /= (H.axes['bootstrap'].size - 1)
+
+    return cov

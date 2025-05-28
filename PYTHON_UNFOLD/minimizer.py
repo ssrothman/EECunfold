@@ -13,7 +13,7 @@ import loss
 cut = {}
 tcut = {}
 
-def setup_loss(histdict):
+def setup_loss(histdict, covmatrix=False):
     #nominal
     Htransfer = histdict['transfer']['nominal']
     Hgen = histdict['gen']['nominal']
@@ -51,7 +51,7 @@ def setup_loss(histdict):
         up = np.nan_to_num(up / (genUp - genBkgUp)[None, :])
         dn = np.nan_to_num(dn / (genDn - genBkgDn)[None, :])
 
-        transferVariations.append(up - dn)
+        transferVariations.append((up - dn)/2)
 
     gamma0 = np.nan_to_num(genBkg0 / gen0)
     rho0 = np.nan_to_num(recoBkg0 / (reco0 - recoBkg0))
@@ -90,7 +90,8 @@ def setup_loss(histdict):
 
     LOSS = loss.FullLoss(transfer0, transferVariations, 
                          gamma0, gammaVariations, 
-                         rho0, rhoVariations)
+                         rho0, rhoVariations,
+                         covmatrix = covmatrix)
 
     torch.set_default_dtype(torch.float64)
 
@@ -102,7 +103,13 @@ def run_minimization(Hreco, LOSS, iboot=0,
                      **kwargs):
 
     reco = Hreco[cut][{'bootstrap' : iboot}].values(flow=True).ravel()
-    recoErr = unc.unc(Hreco[cut]).ravel()
+    if LOSS.covmatrix:
+        cov = unc.cov(Hreco[cut])
+        import eigenpy as eigen
+        cod = eigen.CompleteOrthogonalDecomposition(cov)
+        recoErr = cod.pseudoInverse()
+    else:
+        recoErr = unc.unc(Hreco[cut])
 
     reco = torch.from_numpy(reco)
     recoErr = torch.from_numpy(recoErr)
@@ -150,6 +157,7 @@ def run_minimization(Hreco, LOSS, iboot=0,
             continue
 
     if compute_hessian:
+        print("Computing Hessian...")
         res.hess = torch.autograd.functional.hessian(theloss, res.x, vectorize=False)
 
     return res
