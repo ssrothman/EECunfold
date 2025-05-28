@@ -16,7 +16,7 @@ with open("config/datasets.json", 'rb') as f:
 
 sample = "Pythia_inclusive"
 
-hists = {
+hists0 = {
     "reco" : {},
     "unmatchedReco" : {},
     "untransferedReco" : {},
@@ -25,11 +25,26 @@ hists = {
     "untransferedGen" : {},
     "transfer" : {}
 }
-for key in hists.keys():
-    hists[key]['nominal'] = get_pickled_histogram("Apr_23_2025", "Pythia_inclusive", "EECres4tee", "nominal", "nominal", key)
+hists1 = {
+    "reco" : {},
+    "unmatchedReco" : {},
+    "untransferedReco" : {},
+    "gen" : {},
+    "unmatchedGen" : {},
+    "untransferedGen" : {},
+    "transfer" : {}
+}
+for key in hists0.keys():
+    hists0[key]['nominal'] = get_pickled_histogram("Apr_23_2025", "Pythia_inclusive", "EECres4tee", "nominal", "nominal", key, statN = 2, statK = 0)
+    hists1[key]['nominal'] = get_pickled_histogram("Apr_23_2025", "Pythia_inclusive", "EECres4tee", "nominal", "nominal", key, statN = 2, statK = 1)
 
     for systwt in ['ISR', 'FSR']:
-        hists[key][systwt] = (
-            get_pickled_histogram("Apr_23_2025", "Pythia_inclusive", "EECres4tee", "nominal", systwt+"Up", key),
-            get_pickled_histogram("Apr_23_2025", "Pythia_inclusive", "EECres4tee", "nominal", systwt+"Down", key)  
+        hists0[key][systwt] = (
+            get_pickled_histogram("Apr_23_2025", "Pythia_inclusive", "EECres4tee", "nominal", systwt+"Up", key, statN = 2, statK = 0),
+            get_pickled_histogram("Apr_23_2025", "Pythia_inclusive", "EECres4tee", "nominal", systwt+"Down", key, statN = 2, statK = 0)  
+        )
+
+        hists1[key][systwt] = (
+            get_pickled_histogram("Apr_23_2025", "Pythia_inclusive", "EECres4tee", "nominal", systwt+"Up", key, statN = 2, statK = 1),
+            get_pickled_histogram("Apr_23_2025", "Pythia_inclusive", "EECres4tee", "nominal", systwt+"Down", key, statN = 2, statK = 1)  
         )
