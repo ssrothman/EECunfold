@@ -218,6 +218,9 @@ class FullLoss:
 
         return p + self.recoBkg(p, rho)
 
+    def forward_1arg(self, x):
+        return self.forward(self.get_beta(x), self.get_theta(x), self.get_gamma(x), self.get_rho(x))
+
     def loss(self, x, reco, recoErr):
         beta = x[:self.nBeta]
         theta = x[self.nBeta:self.nBeta+self.nTheta]
@@ -228,18 +231,52 @@ class FullLoss:
 
         if self.covmatrix:
             diff = fwd-reco
-            errTerm = diff.T @ recoErr @ diff
+            errTerm = diff @ recoErr @ diff
         else:
             errTerm = torch.sum(torch.square((fwd-reco) / recoErr))
         cstrTerm = torch.sum(torch.square(x[self.nBeta:]))
         return 0.5 * (errTerm + cstrTerm)
 
     def one_parameter_loss(self, reco, recoErr):
+        reco = torch.tensor(reco, device=self.transfer0.device)
+        recoErr = torch.tensor(recoErr, device=self.transfer0.device)
         theerr = torch.where(recoErr == 0, 1, recoErr)
         return lambda x: self.loss(x, reco, theerr)
 
     def nNuisances(self):
         return self.nGamma + self.nRho + self.nTheta
+
+    def get_beta(self, x):
+        return x[:self.nBeta]
+
+    def get_theta(self, x):
+        return x[self.nBeta:self.nBeta+self.nTheta]
+
+    def get_gamma(self, x):
+        return x[self.nBeta+self.nTheta:self.nBeta+self.nTheta+self.nGamma]
+
+    def get_rho(self, x):
+        return x[self.nBeta+self.nTheta+self.nGamma:]
+
+    def numpy(self):
+        self.transfer0                   = self.transfer0.numpy()
+        self.gamma0                         = self.gamma0.numpy()
+        self.rho0                             = self.rho0.numpy()
+        self.transferVariations = self.transferVariations.numpy()
+        self.gammaVariations       = self.gammaVariations.numpy()
+        self.rhoVariations           = self.rhoVariations.numpy()
+
+        return self
+
+    def cpu(self):
+        self.transfer0                   = self.transfer0.cpu()
+        self.gamma0                         = self.gamma0.cpu()
+        self.rho0                             = self.rho0.cpu()
+        self.transferVariations = self.transferVariations.cpu()
+        self.gammaVariations       = self.gammaVariations.cpu()
+        self.rhoVariations           = self.rhoVariations.cpu()
+
+        return self
 
     def cuda(self):
         self.transfer0 = self.transfer0.cuda()

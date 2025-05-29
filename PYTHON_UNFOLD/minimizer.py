@@ -33,7 +33,9 @@ def setup_loss(histdict, covmatrix=False):
     genBkg0 = HgenBkg[{'bootstrap' : 0}].values(flow=True).ravel()
     transfer0 = Htransfer.values(flow=True).reshape((*reco0.shape, *gen0.shape))
 
-    transfer0 = np.nan_to_num(transfer0 / (gen0 - genBkg0)[None, :])
+    denom = gen0 - genBkg0
+    denom = np.where(denom == 0, 1, denom)
+    transfer0 = transfer0 / denom[None, :]
 
     transferVariations = []
     for key in histdict['transfer']:
@@ -48,13 +50,19 @@ def setup_loss(histdict, covmatrix=False):
         genBkgUp = (histdict['unmatchedGen'][key][0] + histdict['untransferedGen'][key][0])[{'bootstrap' : 0}][cut].values(flow=True).ravel()
         genBkgDn = (histdict['unmatchedGen'][key][1] + histdict['untransferedGen'][key][1])[{'bootstrap' : 0}][cut].values(flow=True).ravel()
 
-        up = np.nan_to_num(up / (genUp - genBkgUp)[None, :])
-        dn = np.nan_to_num(dn / (genDn - genBkgDn)[None, :])
+        denomUp = genUp - genBkgUp
+        denomDn = genDn - genBkgDn
+        denomUp = np.where(denomUp==0, 1, denomUp)
+        denomDn = np.where(denomDn==0, 1, denomDn)
+        up = up / denomUp[None, :]
+        dn = dn / denomDn[None, :]
 
         transferVariations.append((up - dn)/2)
 
-    gamma0 = np.nan_to_num(genBkg0 / gen0)
-    rho0 = np.nan_to_num(recoBkg0 / (reco0 - recoBkg0))
+    denomG = np.where(gen0==0, 1, gen0)
+    denomR = np.where(reco0-recoBkg0==0, 1, reco0-recoBkg0)
+    gamma0 = genBkg0 / denomG
+    rho0 = recoBkg0 / denomR
 
     gammaVariations = []
     rhoVariations = []
@@ -66,8 +74,11 @@ def setup_loss(histdict, covmatrix=False):
         gen_i = Hgen[{'bootstrap' : iboot+1}].values(flow=True).ravel()
         genBkg_i = HgenBkg[{'bootstrap' : iboot+1}].values(flow=True).ravel()
 
-        gamma_i = np.nan_to_num(genBkg_i / gen_i)
-        rho_i = np.nan_to_num(recoBkg_i / (reco_i - recoBkg_i))
+        denomGi = np.where(gen_i==0, 1, gen_i)
+        denomRi = np.where(reco_i - recoBkg_i == 0, 1, reco_i - recoBkg_i)
+
+        gamma_i = genBkg_i / denomGi
+        rho_i = recoBkg_i / denomRi
 
         gammaVariations.append((gamma_i - gamma0)/nboot)
         rhoVariations.append((rho_i - rho0)/nboot)
@@ -100,19 +111,36 @@ def setup_loss(histdict, covmatrix=False):
 def run_minimization(Hreco, LOSS, iboot=0, 
                      method='scan', x0=None,
                      compute_hessian=False,
+                     recoErr = None,
                      **kwargs):
 
     reco = Hreco[cut][{'bootstrap' : iboot}].values(flow=True).ravel()
-    if LOSS.covmatrix:
-        cov = unc.cov(Hreco[cut])
-        import eigenpy as eigen
-        cod = eigen.CompleteOrthogonalDecomposition(cov)
-        recoErr = cod.pseudoInverse()
+
+    if recoErr is None:
+        if LOSS.covmatrix:
+            print("computing cov...")
+            cov = unc.cov(Hreco[cut])
+            import eigenpy as eigen
+            print("inverting cov...")
+            cod = eigen.CompleteOrthogonalDecomposition(cov)
+            recoErr = cod.pseudoInverse()
+
+            np.fill_diagonal(recoErr, np.where(np.diagonal(recoErr)==0, 1, np.diagonal(recoErr)))
+
+        else:
+            recoErr = unc.unc(Hreco[cut])
+            recoErr = np.where(recoErr==0, 1, recoErr)
+
+        recoErr = torch.from_numpy(recoErr)
     else:
-        recoErr = unc.unc(Hreco[cut])
+        if LOSS.covmatrix and len(recoErr.shape) != 2:
+            print("ERROR: need to pass 2d inverse covariance matrix as recoErr")
+            return
+        elif not LOSS.covmatrix and len(recoErr.shape) != 1:
+            print("ERROR: need to pass 1d standard deviation vector as recoErr")
+            return
 
     reco = torch.from_numpy(reco)
-    recoErr = torch.from_numpy(recoErr)
 
     if x0 is None:
         x0 = torch.ones(LOSS.nBeta)
@@ -160,4 +188,36 @@ def run_minimization(Hreco, LOSS, iboot=0,
         print("Computing Hessian...")
         res.hess = torch.autograd.functional.hessian(theloss, res.x, vectorize=False)
 
-    return res
+    return res, reco, recoErr
+
+def dump_result(x, Htemplate, destination):
+    import hist
+    import pickle
+
+    if type(x) is torch.Tensor:
+        x = x.numpy(force=True)
+
+    axes = []
+    for axis in Htemplate.axes:
+        if axis.name == 'bootstrap':
+            continue
+        else:
+                axes.append(axis)
+
+    Hres = hist.Hist(
+        hist.axis.Integer(0, 1, name='bootstrap', label='bootstrap', overflow=False, underflow=False),
+        *axes,
+        storage=hist.storage.Double()
+    )
+
+    shape = list(Htemplate.values(flow=True).shape)
+    shape[0] = 1
+    x = x.reshape(shape)
+
+    Hres += x
+
+    with open(destination, 'wb') as f:
+        pickle.dump(Hres, f)
+
+    return Hres
+
