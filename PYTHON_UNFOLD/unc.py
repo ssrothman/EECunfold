@@ -9,7 +9,7 @@ def unc(H):
     
     return (np.sqrt(err2 / (H.axes['bootstrap'].size - 1))).ravel()
 
-def cov(H):
+def cov(H, clampboot = -1):
     nominal = H[{'bootstrap' : 0}].values(flow=True)
 
     shape = nominal.shape
@@ -18,12 +18,21 @@ def cov(H):
     nominal = nominal.ravel()
 
     cov = np.zeros((Nval, Nval))
+    #sumdiff = np.zeros((Nval,))
+    #sumdiff2 = np.zeros((Nval,))
 
-    for i in range(1, H.axes['bootstrap'].size):
+    if clampboot > 0:
+        looplen = np.min((H.axes['bootstrap'].size, clampboot))
+    else:
+        looplen = H.axes['bootstrap'].size
+
+    for i in range(1, looplen):
         var = H[{'bootstrap' : i}].values(flow=True).ravel()
         diff = var - nominal
         cov += np.outer(diff, diff)
+        #sumdiff += diff
+        #sumdiff2 += np.square(diff)
     
-    cov /= (H.axes['bootstrap'].size - 1)
+    Nboot = looplen-1
 
-    return cov
+    return cov/Nboot
