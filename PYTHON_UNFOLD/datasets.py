@@ -105,9 +105,10 @@ def get_pickled_histogram(runtag, tag, skimmer, objsyst, wtsyst, whichobj,
         if subpath.is_dir():
             continue
         if subpath.name.startswith("%s_%s_%s"%(whichobj, objsyst, wtsyst)) and 'skipNominal' not in subpath.name:
+            print(subpath.name)
             if statN > 0 and "%dstat%d"%(statN, statK) in subpath.name:
                 options.append(subpath.name)
-            elif statN <=0 and 'stat' not in subpath.name:
+            if statN <=0 and 'stat' not in subpath.name:
                 options.append(subpath.name)
 
     if (len(options) == 1):
@@ -119,6 +120,7 @@ def get_pickled_histogram(runtag, tag, skimmer, objsyst, wtsyst, whichobj,
         choice=0
     elif len(options) == 0:
         print("Uh oh no options")
+        print("Looking for %s + %s"%(thepath, '%s_%s_%s'%(whichobj, objsyst, wtsyst)))
         print(runtag, tag, skimmer, objsyst, wtsyst, whichobj)
         return None
         print()
