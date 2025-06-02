@@ -13,86 +13,78 @@ import loss
 cut = {}
 tcut = {}
 
-def setup_loss(histdict, covmatrix=False):
+def get_arrs(histdict, syst, iboot):
+    the_tcut = tcut
+    the_tcut['bootstrap'] = iboot
+
+    the_cut = cut
+    the_cut['bootstrap'] = iboot
+
+    transfer = histdict['transfer'][syst][tcut].values(flow=True)
+
+    gen = histdict['gen'][syst][cut].values(flow=True).ravel()
+    reco = histdict['reco'][syst][cut].values(flow=True).ravel()
+
+    genBkg = (histdict['unmatchedGen'][syst] + histdict['untransferedGen'][syst])[cut].values(flow=True).ravel()
+    recoBkg = (histdict['unmatchedReco'][syst] + histdict['untransferedReco'][syst])[cut].values(flow=True).ravel()
+    
+    transfer = transfer.reshape((reco.shape[0], gen.shape[0]))
+
+    tdenom = gen - genBkg
+    tdenom = np.where(tdenom==0, 1, tedenom)
+    transfer = transfer/tdenom[None, :]
+
+    Gdenom = np.where(gen==0, 1, gen)
+    gamma = genBkg / Gdenom
+
+    Rdenom = np.where(reco-recoBkg==0, 1, reco-recoBkg)
+    rho = recoBkg / Rdenom
+
+    return reco, gen, rho, gamma, transfer
+
+def setup_loss(histdict, covmatrix=False, 
+               Nboot=-1,
+               two_sided_systs=[],
+               one_sided_systs=[]):
     #nominal
-    Htransfer = histdict['transfer']['nominal']
-    Hgen = histdict['gen']['nominal']
-    HgenBkg = histdict['unmatchedGen']['nominal'] + histdict['untransferedGen']['nominal']
-    Hreco = histdict['reco']['nominal']
-    HrecoBkg = histdict['unmatchedReco']['nominal'] + histdict['untransferedReco']['nominal']
+    reco0, gen0, rho0, gamma0, transfer0 = get_arrs(histdict, 'nominal', 0)
 
-    Htransfer = Htransfer[tcut]
-    Hgen = Hgen[cut]
-    HgenBkg = HgenBkg[cut]
-    Hreco = Hreco[cut]
-    HrecoBkg = HrecoBkg[cut]
-
-    reco0 = Hreco[{'bootstrap' : 0}].values(flow=True).ravel()
-    gen0 = Hgen[{'bootstrap' : 0}].values(flow=True).ravel()
-    recoBkg0 = HrecoBkg[{'bootstrap' : 0}].values(flow=True).ravel()
-    genBkg0 = HgenBkg[{'bootstrap' : 0}].values(flow=True).ravel()
-    transfer0 = Htransfer.values(flow=True).reshape((*reco0.shape, *gen0.shape))
-
-    denom = gen0 - genBkg0
-    denom = np.where(denom == 0, 1, denom)
-    transfer0 = transfer0 / denom[None, :]
-
-    transferVariations = []
-    for key in histdict['transfer']:
-        if key == 'nominal':
-            continue
-        up = histdict['transfer'][key][0][tcut].values(flow=True).reshape((*reco0.shape, *gen0.shape))
-        dn = histdict['transfer'][key][1][tcut].values(flow=True).reshape((*reco0.shape, *gen0.shape))
-
-        genUp = histdict['gen'][key][0][{'bootstrap' : 0}][cut].values(flow=True).ravel()
-        genDn = histdict['gen'][key][1][{'bootstrap' : 0}][cut].values(flow=True).ravel()
-
-        genBkgUp = (histdict['unmatchedGen'][key][0] + histdict['untransferedGen'][key][0])[{'bootstrap' : 0}][cut].values(flow=True).ravel()
-        genBkgDn = (histdict['unmatchedGen'][key][1] + histdict['untransferedGen'][key][1])[{'bootstrap' : 0}][cut].values(flow=True).ravel()
-
-        denomUp = genUp - genBkgUp
-        denomDn = genDn - genBkgDn
-        denomUp = np.where(denomUp==0, 1, denomUp)
-        denomDn = np.where(denomDn==0, 1, denomDn)
-        up = up / denomUp[None, :]
-        dn = dn / denomDn[None, :]
-
-        transferVariations.append((up - dn)/2)
-
-    denomG = np.where(gen0==0, 1, gen0)
-    denomR = np.where(reco0-recoBkg0==0, 1, reco0-recoBkg0)
-    gamma0 = genBkg0 / denomG
-    rho0 = recoBkg0 / denomR
-
-    gammaVariations = []
     rhoVariations = []
+    gammaVariations = []
+    transferVariations = []
 
-    nboot = Hreco.axes['bootstrap'].size - 1
-    for iboot in range(nboot):
-        reco_i = Hreco[{'bootstrap' : iboot+1}].values(flow=True).ravel()
-        recoBkg_i = HrecoBkg[{'bootstrap' : iboot+1}].values(flow=True).ravel()
-        gen_i = Hgen[{'bootstrap' : iboot+1}].values(flow=True).ravel()
-        genBkg_i = HgenBkg[{'bootstrap' : iboot+1}].values(flow=True).ravel()
+    #stat variations
+    if Nboot <= 0:
+        Nboot = histdict['reco']['nominal'].axes['bootstrap'].size - 1
 
-        denomGi = np.where(gen_i==0, 1, gen_i)
-        denomRi = np.where(reco_i - recoBkg_i == 0, 1, reco_i - recoBkg_i)
+    for iboot in range(1, Nboot+1):
+        _, _, rho_i, gamma_i, transfer_i = get_arrs(histdict, 'nominal', iboot)
+        rhoVariations.append((rho_i - rho0)/Nboot)
+        gammaVariations.append((gamma_i - gamma0)/Nboot)
+        transferVariations.append((transfer_i - transfer0)/Nboot)
 
-        gamma_i = genBkg_i / denomGi
-        rho_i = recoBkg_i / denomRi
+    #syst variations
+    for syst in two_sided_systs:
+        _, _, rho_up, gamma_up, transfer_up = get_arrs(histdict, '%sUp'%syst, 0)
+        _, _, rho_dn, gamma_dn, transfer_dn = get_arrs(histdict, '%sDown'%syst, 0)
+        rhoVariations.append(0.5*(rho_up - rho_dn))
+        gammaVariations.append(0.5*(gamma_up - gamma_dn))
+        transferVariations.append(0.5*(transfer_up - transfer_dn))
 
-        gammaVariations.append((gamma_i - gamma0)/nboot)
-        rhoVariations.append((rho_i - rho0)/nboot)
+    for syst in one_sided_systs:
+        _, _, rho_up, gamma_up, transfer_up = get_arrs(histdict, syst, 0)
+        rhoVariations.append(rho_up - rho0)
+        gammaVariations.append(gamma_up - gamma0)
+        transferVariations.append(transfer_up - transfer0)
 
-    transferVariations = np.asarray(transferVariations)
-    gammaVariations = np.asarray(gammaVariations)
     rhoVariations = np.asarray(rhoVariations)
+    gammaVariations = np.asarray(gammaVaraitions)
+    transferVariations = np.asarray(transferVariations)
 
     print("reco0: ", reco0.shape)
     print("gen0: ", gen0.shape)
-
     print("gamma0: ", gamma0.shape)
     print("rho0: ", rho0.shape)
-
     print("transfer0: ", transfer0.shape)
     print()
     print("gammaVariations", gammaVariations.shape)

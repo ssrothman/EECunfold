@@ -180,133 +180,133 @@ class FullLoss:
     L = 1/2 (reco_pred - reco_true)^2 / reco_uncertainty^2 + 1/2 sum_i (nuisance_i)^2
     TODO: is the 1/2 correct?
     '''
-    def __init__(self, transfer0, transferVariations, gamma0, gammaVariations, rho0, rhoVariations, covmatrix = False):
-        self.transfer0 = torch.from_numpy(transfer0)
-        self.transferVariations = torch.from_numpy(transferVariations)
-        self.gamma0 = torch.from_numpy(gamma0)
-        self.gammaVariations = torch.from_numpy(gammaVariations)
-        self.rho0 = torch.from_numpy(rho0)
-        self.rhoVariations = torch.from_numpy(rhoVariations)
+    def __init__(self, transfer0, transferVariations,
+                       gamma0, gammaVariations,
+                       rho0, rhoVariations,
+                 covmatrix = False):
 
-        self.nGamma = gammaVariations.shape[0]
-        self.nRho = rhoVariations.shape[0]
+        self.transfer0 = transfer0
+        self.gamma0 = gamma0
+        self.rho0 = rho0
+
+        self.transferVariations = transferVariations
+        self.gammaVariations = gammaVariations
+        self.rhoVariations = rhoVariations
+
+        self.arrays = ['transfer0', 'gamma0', 'rho0', 
+                       'transferVariations',
+                       'gammaVariations',
+                       'rhoVariations']
+
         self.nTheta = transferVariations.shape[0]
         self.nBeta = transfer0.shape[1]
+
+        if transferVariations.shape[0] != gammaVariations.shape[0] or \
+                transferVariations.shape[0] != rhoVariations.shape[0] or \
+                gammaVariations.shape[0] != rhoVariations.shape[0]:
+            raise ValueError("Need T, G, R to have same number of variations")
 
         self.covmatrix = covmatrix
 
         print("nBeta:", self.nBeta)
         print("nTheta:", self.nTheta)
-        print("nGamma:", self.nGamma)
-        print("nRho:", self.nRho)
         print("Expecting inverse covariance matrix?", self.covmatrix)
 
-    def genBkg(self, beta, gamma):
-        G = self.gamma0 + torch.tensordot(gamma, self.gammaVariations, 1)
-        return G * beta
+    def getG(self, theta):
+        return self.gamma0 + torch.tensordot(theta, self.gammaVariations, 1)
 
-    def recoBkg(self, p, rho):
-        R = self.rho0 + torch.tensordot(rho, self.rhoVariations, 1)
-        return R * p
+    def getR(self, theta):
+        return self.rho0 + torch.tensordot(theta, self.rhoVariations, 1)
 
-    def forward(self, beta, theta, gamma, rho):
-        genpure = beta - self.genBkg(beta, gamma)
+    def getT(self, theta):
+        return self.transfer0 + torch.tensordot(theta, self.transferVariations, 1) 
 
-        thetransfer = self.transfer0 + torch.tensordot(theta, self.transferVariations, 1)
+    def genBkg(self, beta, theta):
+        return self.getG(theta) * beta
 
-        p = torch.matmul(thetransfer, genpure)
+    def recoBkg(self, p, theta):
+        return self.getR(theta) * p
 
-        return p + self.recoBkg(p, rho)
+    def forward(self, beta, theta):
+        genpure = beta - self.genBkg(beta, theta)
+
+        p = torch.matmul(self.getT(theta), genpure)
+
+        return p + self.recoBkg(p, theta)
 
     def forward_1arg(self, x):
-        return self.forward(self.get_beta(x), self.get_theta(x), self.get_gamma(x), self.get_rho(x))
+        return self.forward(self.get_beta(x), self.get_theta(x))
 
     def loss(self, x, reco, recoErr):
         beta = x[:self.nBeta]
-        theta = x[self.nBeta:self.nBeta+self.nTheta]
-        gamma = x[self.nBeta+self.nTheta:self.nBeta+self.nTheta+self.nGamma]
-        rho = x[self.nBeta+self.nTheta+self.nGamma:]
+        theta = x[self.nBeta:]
 
-        fwd = self.forward(beta*reco, theta, gamma, rho)
+        fwd = self.forward(beta*reco, theta)
 
         if self.covmatrix:
             diff = fwd-reco
             errTerm = diff @ recoErr @ diff
         else:
             errTerm = torch.sum(torch.square((fwd-reco) / recoErr))
+
         cstrTerm = torch.sum(torch.square(x[self.nBeta:]))
         return 0.5 * (errTerm + cstrTerm)
 
     def one_parameter_loss(self, reco, recoErr):
-        reco = torch.tensor(reco, device=self.transfer0.device)
-        recoErr = torch.tensor(recoErr, device=self.transfer0.device)
+        if type(reco) is not torch.Tensor:
+            reco = torch.from_numpy(reco)
+        if type(recoErr) is not torch.Tensor:
+            recoErr = torch.from_numpy(reco)
+
+        reco = reco.to(self.transfer0.device)
+        recoErr = recoErr.to(self.trasfer0.device)
+
         theerr = torch.where(recoErr == 0, 1, recoErr)
+
         return lambda x: self.loss(x, reco, theerr)
 
     def nNuisances(self):
-        return self.nGamma + self.nRho + self.nTheta
+        return self.nTheta
 
     def get_beta(self, x):
         return x[:self.nBeta]
 
     def get_theta(self, x):
-        return x[self.nBeta:self.nBeta+self.nTheta]
+        return x[self.nBeta:]
 
-    def get_gamma(self, x):
-        return x[self.nBeta+self.nTheta:self.nBeta+self.nTheta+self.nGamma]
-
-    def get_rho(self, x):
-        return x[self.nBeta+self.nTheta+self.nGamma:]
-
-    def numpy(self):
-        self.transfer0                   = self.transfer0.numpy()
-        self.gamma0                         = self.gamma0.numpy()
-        self.rho0                             = self.rho0.numpy()
-        self.transferVariations = self.transferVariations.numpy()
-        self.gammaVariations       = self.gammaVariations.numpy()
-        self.rhoVariations           = self.rhoVariations.numpy()
+    def numpy(self, *args, **kwargs):
+        for name in self.arrays:
+            getattr(self, name) = getattr(self, name).numpy(*args, **kwargs)
 
         return self
 
     def torch(self):
-        self.transfer0               = torch.from_numpy(self.transfer0)
-        self.gamma0                  = torch.from_numpy(self.gamma0)
-        self.rho0                    = torch.from_numpy(self.rho0)
-        self.transferVariations      = torch.from_numpy(self.transferVariations)
-        self.gammaVariations         = torch.from_numpy(self.gammaVariations)
-        self.rhoVariations           = torch.from_numpy(self.rhoVariations)
+        for name in self.arrays:
+            getattr(self, name) = torch.from_numpy(getattr(self, name))
 
         return self
 
     def cpu(self):
-        self.transfer0                   = self.transfer0.cpu()
-        self.gamma0                         = self.gamma0.cpu()
-        self.rho0                             = self.rho0.cpu()
-        self.transferVariations = self.transferVariations.cpu()
-        self.gammaVariations       = self.gammaVariations.cpu()
-        self.rhoVariations           = self.rhoVariations.cpu()
+        for name in self.arrays:
+            getattr(self, name) = getattr(self, name).cpu()
 
         return self
 
     def cuda(self):
-        self.transfer0 = self.transfer0.cuda()
-        self.gamma0 = self.gamma0.cuda()
-        self.rho0 = self.rho0.cuda()
-        self.transferVariations = self.transferVariations.cuda()
-        self.gammaVariations = self.gammaVariations.cuda()
-        self.rhoVariations = self.rhoVariations.cuda()
+        for name in self.arrays:
+            getattr(self, name) = getattr(self, name).cuda()
 
         return self
 
     def to(self, device):
-        self.transfer0 = self.transfer0.to(device)
-        self.gamma0 = self.gamma0.to(device)
-        self.rho0 = self.rho0.to(device)
-        self.transferVariations = self.transferVariations.to(device)
-        self.gammaVariations = self.gammaVaraitions.to(device)
-        self.rhoVariations = self.rhoVariations.to(device)
+        for name in self.arrays:
+            getattr(self, name) = getattr(self, name).to_device)
 
         return self
+
+    def detach(self):
+        for name in self.arrays:
+            getattr(self, name) = getattr(self, name).detach()
 
 losses = {
     "Simplest" : SimplestLoss,
