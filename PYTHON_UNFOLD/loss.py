@@ -268,6 +268,16 @@ class FullLoss:
 
         return self
 
+    def torch(self):
+        self.transfer0               = torch.from_numpy(self.transfer0)
+        self.gamma0                  = torch.from_numpy(self.gamma0)
+        self.rho0                    = torch.from_numpy(self.rho0)
+        self.transferVariations      = torch.from_numpy(self.transferVariations)
+        self.gammaVariations         = torch.from_numpy(self.gammaVariations)
+        self.rhoVariations           = torch.from_numpy(self.rhoVariations)
+
+        return self
+
     def cpu(self):
         self.transfer0                   = self.transfer0.cpu()
         self.gamma0                         = self.gamma0.cpu()
@@ -285,6 +295,16 @@ class FullLoss:
         self.transferVariations = self.transferVariations.cuda()
         self.gammaVariations = self.gammaVariations.cuda()
         self.rhoVariations = self.rhoVariations.cuda()
+
+        return self
+
+    def to(self, device):
+        self.transfer0 = self.transfer0.to(device)
+        self.gamma0 = self.gamma0.to(device)
+        self.rho0 = self.rho0.to(device)
+        self.transferVariations = self.transferVariations.to(device)
+        self.gammaVariations = self.gammaVaraitions.to(device)
+        self.rhoVariations = self.rhoVariations.to(device)
 
         return self
 

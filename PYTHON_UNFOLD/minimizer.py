@@ -111,8 +111,16 @@ def setup_loss(histdict, covmatrix=False):
 def run_minimization(Hreco, LOSS, iboot=0, 
                      method='scan', x0=None,
                      compute_hessian=False,
+                     compute_inv_hess=False,
                      recoErr = None,
+                     device='cuda',
                      **kwargs):
+
+    if compute_inv_hess:
+        compute_hessian = True
+
+    if type(device) is str:
+        device = torch.device(device)
 
     reco = Hreco[cut][{'bootstrap' : iboot}].values(flow=True).ravel()
 
@@ -153,11 +161,17 @@ def run_minimization(Hreco, LOSS, iboot=0,
     else:
         methodlist = [method]
         
-    LOSS = LOSS.cuda()
-    reco = reco.cuda()
-    recoErr = recoErr.cuda()
+    LOSS = LOSS.to(device)
+    if type(reco) is not torch.Tensor:
+        reco = torch.from_numpy(reco)
+    reco = reco.to(device)
+    if type(recoErr) is not torch.Tensor:
+        recoErr = torch.from_numpy(recoErr)
+    recoErr = recoErr.to(device)
     theloss = LOSS.one_parameter_loss(reco, recoErr)
-    x0 = x0.cuda()
+    if type(x0) is not torch.Tensor:
+        x0 = torch.from_numpy(x0)
+    x0 = x0.to(device)
 
     for method in methodlist:
         try:
@@ -188,7 +202,22 @@ def run_minimization(Hreco, LOSS, iboot=0,
         print("Computing Hessian...")
         res.hess = torch.autograd.functional.hessian(theloss, res.x, vectorize=False)
 
+        if compute_inv_hess:
+            import eigenpy as eigen
+            print("Computing inverse Hessian...")
+            codhess = eigen.CompleteOrthogonalDecomposition(res.hess.numpy(force=True))
+            res.invhess = codhess.pseudoInverse()
+
+    res_to_npy(res)
+    reco = reco.numpy(force=True)
+    recoErr = recoErr.numpy(force=True)
+
     return res, reco, recoErr
+
+def res_to_npy(res):
+    for key in res.keys():
+        if type(res[key]) is torch.Tensor:
+            res[key] = res[key].numpy(force=True)
 
 def dump_result(x, Htemplate, destination):
     import hist
