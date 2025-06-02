@@ -180,7 +180,8 @@ class FullLoss:
     L = 1/2 (reco_pred - reco_true)^2 / reco_uncertainty^2 + 1/2 sum_i (nuisance_i)^2
     TODO: is the 1/2 correct?
     '''
-    def __init__(self, transfer0, transferVariations,
+    def __init__(self, transfer0, transferVariations, 
+                       transferVarIndices,
                        gamma0, gammaVariations,
                        rho0, rhoVariations,
                  covmatrix = False):
@@ -190,21 +191,26 @@ class FullLoss:
         self.rho0 = rho0
 
         self.transferVariations = transferVariations
+        self.transferVarIndices = transferVarIndices
+
         self.gammaVariations = gammaVariations
         self.rhoVariations = rhoVariations
 
         self.arrays = ['transfer0', 'gamma0', 'rho0', 
                        'transferVariations',
+                       'transferVarIndices',
                        'gammaVariations',
                        'rhoVariations']
 
-        self.nTheta = transferVariations.shape[0]
+        self.nTheta = gammaVariations.shape[0]
+        self.nTransfer = transferVarIndices.shape[0]
         self.nBeta = transfer0.shape[1]
 
-        if transferVariations.shape[0] != gammaVariations.shape[0] or \
-                transferVariations.shape[0] != rhoVariations.shape[0] or \
-                gammaVariations.shape[0] != rhoVariations.shape[0]:
-            raise ValueError("Need T, G, R to have same number of variations")
+        if transferVariations.shape[0] != transferVarIndices.shape[0]:
+            raise ValueError("TransferVariations needs to align with its indices")
+
+        if gammaVariations.shape[0] != rhoVariations.shape[0]:
+            raise ValueError("G, R to have same number of variations")
 
         self.covmatrix = covmatrix
 
@@ -219,7 +225,7 @@ class FullLoss:
         return self.rho0 + torch.tensordot(theta, self.rhoVariations, 1)
 
     def getT(self, theta):
-        return self.transfer0 + torch.tensordot(theta, self.transferVariations, 1) 
+        return self.transfer0 + torch.tensordot(theta[self.transferVarIndices], self.transferVariations, 1) 
 
     def genBkg(self, beta, theta):
         return self.getG(theta) * beta
@@ -259,7 +265,7 @@ class FullLoss:
             recoErr = torch.from_numpy(reco)
 
         reco = reco.to(self.transfer0.device)
-        recoErr = recoErr.to(self.trasfer0.device)
+        recoErr = recoErr.to(self.transfer0.device)
 
         theerr = torch.where(recoErr == 0, 1, recoErr)
 
@@ -276,37 +282,38 @@ class FullLoss:
 
     def numpy(self, *args, **kwargs):
         for name in self.arrays:
-            getattr(self, name) = getattr(self, name).numpy(*args, **kwargs)
+            setattr(self, name, getattr(self, name).numpy(*args, **kwargs))
 
         return self
 
     def torch(self):
         for name in self.arrays:
-            getattr(self, name) = torch.from_numpy(getattr(self, name))
+            if type(getattr(self, name)) is not torch.Tensor:
+                setattr(self, name, torch.from_numpy(getattr(self, name)))
 
         return self
 
     def cpu(self):
         for name in self.arrays:
-            getattr(self, name) = getattr(self, name).cpu()
+            setattr(self, name, getattr(self, name).cpu())
 
         return self
 
     def cuda(self):
         for name in self.arrays:
-            getattr(self, name) = getattr(self, name).cuda()
+            setattr(self, name, getattr(self, name).cuda())
 
         return self
 
     def to(self, device):
         for name in self.arrays:
-            getattr(self, name) = getattr(self, name).to_device)
+            setattr(self, name, getattr(self, name).to(device))
 
         return self
 
     def detach(self):
         for name in self.arrays:
-            getattr(self, name) = getattr(self, name).detach()
+            setattr(self, name, getattr(self, name).detach())
 
 losses = {
     "Simplest" : SimplestLoss,

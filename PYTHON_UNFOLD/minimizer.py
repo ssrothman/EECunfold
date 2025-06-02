@@ -14,25 +14,29 @@ cut = {}
 tcut = {}
 
 def get_arrs(histdict, syst, iboot):
-    the_tcut = tcut
+    the_tcut = tcut.copy()
     the_tcut['bootstrap'] = iboot
 
-    the_cut = cut
+    the_cut = cut.copy()
     the_cut['bootstrap'] = iboot
 
-    transfer = histdict['transfer'][syst][tcut].values(flow=True)
+    if iboot < histdict['transfer'][syst].axes['bootstrap'].size:
+        transfer = histdict['transfer'][syst][the_tcut].values(flow=True)
+    else:
+        transfer = None
 
-    gen = histdict['gen'][syst][cut].values(flow=True).ravel()
-    reco = histdict['reco'][syst][cut].values(flow=True).ravel()
+    gen = histdict['gen'][syst][the_cut].values(flow=True).ravel()
+    reco = histdict['reco'][syst][the_cut].values(flow=True).ravel()
 
-    genBkg = (histdict['unmatchedGen'][syst] + histdict['untransferedGen'][syst])[cut].values(flow=True).ravel()
-    recoBkg = (histdict['unmatchedReco'][syst] + histdict['untransferedReco'][syst])[cut].values(flow=True).ravel()
+    genBkg = (histdict['unmatchedGen'][syst] + histdict['untransferedGen'][syst])[the_cut].values(flow=True).ravel()
+    recoBkg = (histdict['unmatchedReco'][syst] + histdict['untransferedReco'][syst])[the_cut].values(flow=True).ravel()
     
-    transfer = transfer.reshape((reco.shape[0], gen.shape[0]))
+    if transfer is not None:
+        transfer = transfer.reshape((reco.shape[0], gen.shape[0]))
 
-    tdenom = gen - genBkg
-    tdenom = np.where(tdenom==0, 1, tedenom)
-    transfer = transfer/tdenom[None, :]
+        tdenom = gen - genBkg
+        tdenom = np.where(tdenom==0, 1, tdenom)
+        transfer = transfer/tdenom[None, :]
 
     Gdenom = np.where(gen==0, 1, gen)
     gamma = genBkg / Gdenom
@@ -52,6 +56,7 @@ def setup_loss(histdict, covmatrix=False,
     rhoVariations = []
     gammaVariations = []
     transferVariations = []
+    transferVarIndices = []
 
     #stat variations
     if Nboot <= 0:
@@ -61,7 +66,9 @@ def setup_loss(histdict, covmatrix=False,
         _, _, rho_i, gamma_i, transfer_i = get_arrs(histdict, 'nominal', iboot)
         rhoVariations.append((rho_i - rho0)/Nboot)
         gammaVariations.append((gamma_i - gamma0)/Nboot)
-        transferVariations.append((transfer_i - transfer0)/Nboot)
+        if transfer_i is not None:
+            transferVariations.append((transfer_i - transfer0)/Nboot)
+            transferVarIndices.append(len(rhoVariations)-1)
 
     #syst variations
     for syst in two_sided_systs:
@@ -70,16 +77,19 @@ def setup_loss(histdict, covmatrix=False,
         rhoVariations.append(0.5*(rho_up - rho_dn))
         gammaVariations.append(0.5*(gamma_up - gamma_dn))
         transferVariations.append(0.5*(transfer_up - transfer_dn))
+        transferVarIndices.append(len(rhoVariations)-1)
 
     for syst in one_sided_systs:
         _, _, rho_up, gamma_up, transfer_up = get_arrs(histdict, syst, 0)
         rhoVariations.append(rho_up - rho0)
         gammaVariations.append(gamma_up - gamma0)
         transferVariations.append(transfer_up - transfer0)
+        transferVarIndices.append(len(rhoVariations)-1)
 
     rhoVariations = np.asarray(rhoVariations)
-    gammaVariations = np.asarray(gammaVaraitions)
+    gammaVariations = np.asarray(gammaVariations)
     transferVariations = np.asarray(transferVariations)
+    transferVarIndices = np.asarray(transferVarIndices)
 
     print("reco0: ", reco0.shape)
     print("gen0: ", gen0.shape)
@@ -90,8 +100,11 @@ def setup_loss(histdict, covmatrix=False,
     print("gammaVariations", gammaVariations.shape)
     print("rhoVariations", rhoVariations.shape)
     print("transferVariations", transferVariations.shape)
+    print("transferVarIndices: ", transferVarIndices.shape)
+    print("\t", transferVarIndices)
 
     LOSS = loss.FullLoss(transfer0, transferVariations, 
+                         transferVarIndices,
                          gamma0, gammaVariations, 
                          rho0, rhoVariations,
                          covmatrix = covmatrix)
@@ -147,12 +160,21 @@ def run_minimization(Hreco, LOSS, iboot=0,
         t0 = torch.zeros(LOSS.nNuisances())
         x0 = torch.cat((x0, t0), dim=0)
 
+    if type(x0) is not torch.Tensor:
+        x0 = torch.from_numpy(x0)
+
+    if x0.shape[0] == LOSS.nBeta:
+        t0 = torch.zeros(LOSS.nNuisances())
+        x0 = torch.cat((x0, t0), dim=0)
+
     if method == 'scan':
         methodlist = ['bfgs', 'l-bfgs', 'cg', 'newton-cg', 'newton-exact', 
                       'dogleg', 'trust-ncg', 'trust-exact', 'trust-krylov']
     else:
         methodlist = [method]
         
+    LOSS = LOSS.torch()
+
     LOSS = LOSS.to(device)
     if type(reco) is not torch.Tensor:
         reco = torch.from_numpy(reco)
@@ -185,9 +207,9 @@ def run_minimization(Hreco, LOSS, iboot=0,
             print("\tL = %g"%res.fun.cpu().detach().item())
         except Exception as e:
             print(f"Method {method} failed with error: {e}")
-            #print("Stack trace:")
-            #import traceback
-            #traceback.print_exc()
+            print("Stack trace:")
+            import traceback
+            traceback.print_exc()
             continue
 
     if compute_hessian:
