@@ -248,14 +248,18 @@ class FullLoss:
         theta = x[self.nBeta:]
 
         fwd = self.forward(beta*reco, theta)
+        #print("FWD: ", fwd)
+        diff = fwd-reco
+        #print("DIFF: ", diff)
 
         if self.covmatrix:
-            diff = fwd-reco
-            errTerm = diff @ recoErr @ diff
+            errTerm = torch.linalg.multi_dot((diff, recoErr, diff))
         else:
-            errTerm = torch.sum(torch.square((fwd-reco) / recoErr))
+            errTerm = torch.sum(torch.square(diff/recoErr))
+        #print("ERR: ", errTerm)
 
         cstrTerm = torch.sum(torch.square(x[self.nBeta:]))
+        #print("CSTR: ", cstrTerm)
         return 0.5 * (errTerm + cstrTerm)
 
     def one_parameter_loss(self, reco, recoErr):
@@ -267,9 +271,7 @@ class FullLoss:
         reco = reco.to(self.transfer0.device)
         recoErr = recoErr.to(self.transfer0.device)
 
-        theerr = torch.where(recoErr == 0, 1, recoErr)
-
-        return lambda x: self.loss(x, reco, theerr)
+        return lambda x: self.loss(x, reco, recoErr)
 
     def nNuisances(self):
         return self.nTheta

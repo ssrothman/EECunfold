@@ -6,6 +6,7 @@ from tqdm import tqdm
 import torchmin
 import torch
 import loss
+from scipy.stats import multivariate_normal
 
 #cut = {'pt' : slice(None,None,sum)}
 #tcut = {'pt_reco' : slice(None,None,sum), 'pt_gen' : slice(None,None,sum)}
@@ -15,27 +16,43 @@ tcut = {}
 
 def get_arrs(histdict, syst, iboot):
     the_tcut = tcut.copy()
-    the_tcut['bootstrap'] = iboot
-
     the_cut = cut.copy()
-    the_cut['bootstrap'] = iboot
+    if iboot is not None:
+        the_tcut['bootstrap'] = iboot
+        the_cut['bootstrap'] = iboot
 
-    if iboot < histdict['transfer'][syst].axes['bootstrap'].size:
-        transfer = histdict['transfer'][syst][the_tcut].values(flow=True)
+    transfer = histdict['transfer'][syst][the_tcut].values(flow=True)
+
+    gen = histdict['gen'][syst][the_cut].values(flow=True)
+    reco = histdict['reco'][syst][the_cut].values(flow=True)
+
+    genBkg = (histdict['unmatchedGen'][syst] + histdict['untransferedGen'][syst])[the_cut].values(flow=True)
+    recoBkg = (histdict['unmatchedReco'][syst] + histdict['untransferedReco'][syst])[the_cut].values(flow=True)
+
+    if iboot is None:
+        reco = reco.reshape((reco.shape[0], -1))
+        gen = gen.reshape((gen.shape[0], -1))
+        genBkg = genBkg.reshape((genBkg.shape[0], -1))
+        recoBkg = recoBkg.reshape((recoBkg.shape[0], -1))
+
+        recoshape = reco.shape[1]
+        genshape = gen.shape[1]
     else:
-        transfer = None
+        reco = reco.ravel()
+        gen = gen.ravel()
+        genBkg = genBkg.ravel()
+        recoBkg = recoBkg.ravel()
 
-    gen = histdict['gen'][syst][the_cut].values(flow=True).ravel()
-    reco = histdict['reco'][syst][the_cut].values(flow=True).ravel()
+        recoshape = reco.shape[0] 
+        genshape = gen.shape[0]
 
-    genBkg = (histdict['unmatchedGen'][syst] + histdict['untransferedGen'][syst])[the_cut].values(flow=True).ravel()
-    recoBkg = (histdict['unmatchedReco'][syst] + histdict['untransferedReco'][syst])[the_cut].values(flow=True).ravel()
-    
     if transfer is not None:
-        transfer = transfer.reshape((reco.shape[0], gen.shape[0]))
+        transfer = transfer.reshape((recoshape, genshape))
 
         tdenom = gen - genBkg
         tdenom = np.where(tdenom==0, 1, tdenom)
+        if iboot is None:
+            tdenom = tdenom[0]
         transfer = transfer/tdenom[None, :]
 
     Gdenom = np.where(gen==0, 1, gen)
@@ -62,16 +79,15 @@ def setup_loss(histdict, covmatrix=False,
     if Nboot <= 0:
         Nboot = histdict['reco']['nominal'].axes['bootstrap'].size - 1
 
-    for iboot in range(1, Nboot+1):
-        _, _, rho_i, gamma_i, transfer_i = get_arrs(histdict, 'nominal', iboot)
-        rhoVariations.append((rho_i - rho0)/Nboot)
-        gammaVariations.append((gamma_i - gamma0)/Nboot)
-        if transfer_i is not None:
-            transferVariations.append((transfer_i - transfer0)/Nboot)
-            transferVarIndices.append(len(rhoVariations)-1)
+    print("Building stat templates...")
+    _, _, rhoboot, gammaboot, _ = get_arrs(histdict, 'nominal', None)
+    for iboot in tqdm(range(1, Nboot+1)):
+        rhoVariations.append((rhoboot[iboot] - rho0)/Nboot)
+        gammaVariations.append((gammaboot[iboot] - gamma0)/Nboot)
 
     #syst variations
-    for syst in two_sided_systs:
+    print("Buiding two-sided systs...")
+    for syst in tqdm(two_sided_systs):
         _, _, rho_up, gamma_up, transfer_up = get_arrs(histdict, '%sUp'%syst, 0)
         _, _, rho_dn, gamma_dn, transfer_dn = get_arrs(histdict, '%sDown'%syst, 0)
         rhoVariations.append(0.5*(rho_up - rho_dn))
@@ -79,7 +95,8 @@ def setup_loss(histdict, covmatrix=False,
         transferVariations.append(0.5*(transfer_up - transfer_dn))
         transferVarIndices.append(len(rhoVariations)-1)
 
-    for syst in one_sided_systs:
+    print("Building one-sided systs...")
+    for syst in tqdm(one_sided_systs):
         _, _, rho_up, gamma_up, transfer_up = get_arrs(histdict, syst, 0)
         rhoVariations.append(rho_up - rho0)
         gammaVariations.append(gamma_up - gamma0)
@@ -113,11 +130,10 @@ def setup_loss(histdict, covmatrix=False,
 
     return LOSS
 
-def run_minimization(Hreco, LOSS, iboot=0, 
+def run_minimization(LOSS, reco, recoErr, 
                      method='scan', x0=None,
                      compute_hessian=False,
                      compute_inv_hess=False,
-                     recoErr = None,
                      device='cuda',
                      **kwargs):
 
@@ -127,37 +143,11 @@ def run_minimization(Hreco, LOSS, iboot=0,
     if type(device) is str:
         device = torch.device(device)
 
-    reco = Hreco[cut][{'bootstrap' : iboot}].values(flow=True).ravel()
-
-    if recoErr is None:
-        if LOSS.covmatrix:
-            print("computing cov...")
-            cov = unc.cov(Hreco[cut])
-            import eigenpy as eigen
-            print("inverting cov...")
-            cod = eigen.CompleteOrthogonalDecomposition(cov)
-            recoErr = cod.pseudoInverse()
-
-            np.fill_diagonal(recoErr, np.where(np.diagonal(recoErr)==0, 1, np.diagonal(recoErr)))
-
-        else:
-            recoErr = unc.unc(Hreco[cut])
-            recoErr = np.where(recoErr==0, 1, recoErr)
-
-        recoErr = torch.from_numpy(recoErr)
-    else:
-        if LOSS.covmatrix and len(recoErr.shape) != 2:
-            print("ERROR: need to pass 2d inverse covariance matrix as recoErr")
-            return
-        elif not LOSS.covmatrix and len(recoErr.shape) != 1:
-            print("ERROR: need to pass 1d standard deviation vector as recoErr")
-            return
-
-    reco = torch.from_numpy(reco)
+    recoErr = np.where(recoErr==0, 1, recoErr)
 
     if x0 is None:
-        x0 = torch.ones(LOSS.nBeta)
-        t0 = torch.zeros(LOSS.nNuisances())
+        x0 = torch.from_numpy(np.ones(LOSS.nBeta, dtype=reco.dtype))
+        t0 = torch.from_numpy(np.zeros(LOSS.nNuisances(), dtype=reco.dtype))
         x0 = torch.cat((x0, t0), dim=0)
 
     if type(x0) is not torch.Tensor:
@@ -233,31 +223,25 @@ def res_to_npy(res):
         if type(res[key]) is torch.Tensor:
             res[key] = res[key].numpy(force=True)
 
-def dump_result(x, Htemplate, destination):
+def dump_result(x, invhess, reco, Htemplate, destination):
     import hist
     import pickle
 
     if type(x) is torch.Tensor:
         x = x.numpy(force=True)
+    if type(reco) is torch.Tensor:
+        reco = reco.numpy(force=True)
 
-    axes = []
-    for axis in Htemplate.axes:
-        if axis.name == 'bootstrap':
-            continue
-        else:
-                axes.append(axis)
+    Hres = Htemplate.copy().reset()
 
-    Hres = hist.Hist(
-        hist.axis.Integer(0, 1, name='bootstrap', label='bootstrap', overflow=False, underflow=False),
-        *axes,
-        storage=hist.storage.Double()
-    )
+    shape = list(Htemplate.values(flow=True).shape[1:])
 
-    shape = list(Htemplate.values(flow=True).shape)
-    shape[0] = 1
-    x = x.reshape(shape)
+    Hres.view(flow=True)[0] += (x[:reco.shape[0]] * reco).reshape(shape)
 
-    Hres += x
+    distr = multivariate_normal(x, invhess, allow_singular=True)
+    samples = distr.rvs(size=(Hres.axes['bootstrap'].size-1,))
+
+    Hres.view(flow=True)[1:] += (samples[:,:reco.shape[0]] * reco[None,:]).reshape((Hres.axes['bootstrap'].size-1, *shape))
 
     with open(destination, 'wb') as f:
         pickle.dump(Hres, f)
