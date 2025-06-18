@@ -206,10 +206,9 @@ def get_pickled_histogram(runtag, tag, skimmer, objsyst, wtsyst, whichobj,
             if 'skipNominal' not in subpath.name:
                 Hnext = Hnext[{'bootstrap' : slice(1, None)}]
 
-        
         Nboot_so_far += Hnext.axes['bootstrap'].size
         Hboots.append(Hnext)
-        if max_nboot > 0 and Nboot_so_far >= max_nboot:
+        if max_nboot >= 0 and Nboot_so_far >= max_nboot:
             break
 
     expected_sumwt = H.sum(flow=True)
