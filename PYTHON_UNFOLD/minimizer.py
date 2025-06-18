@@ -223,7 +223,7 @@ def res_to_npy(res):
         if type(res[key]) is torch.Tensor:
             res[key] = res[key].numpy(force=True)
 
-def dump_result(x, invhess, reco, Htemplate, destination):
+def dump_result(x, invhess, reco, Htemplate, Nboot, destination):
     import hist
     import pickle
 
@@ -232,19 +232,35 @@ def dump_result(x, invhess, reco, Htemplate, destination):
     if type(reco) is torch.Tensor:
         reco = reco.numpy(force=True)
 
-    Hres = Htemplate.copy().reset()
+    invhess = 0.5 * (invhess + invhess.T)  # Ensure symmetry
+
+    axes = []
+    for ax in Htemplate.axes:
+        if ax.name == 'bootstrap':
+            axes.append(hist.axis.Integer(
+                0, Nboot+1, 
+                label='bootstrap',
+                name='bootstrap',
+                underflow=False, overflow=False
+            ))
+        else:
+            axes.append(ax)
+
+    Hres = hist.Hist(
+        *axes,
+        storage=hist.storage.Double(),         
+    )
 
     shape = list(Htemplate.values(flow=True).shape[1:])
 
     Hres.view(flow=True)[0] += (x[:reco.shape[0]] * reco).reshape(shape)
 
+    print("Generating toys from multivariate gaussian...")
     distr = multivariate_normal(x, invhess, allow_singular=True)
     samples = distr.rvs(size=(Hres.axes['bootstrap'].size-1,))
 
     Hres.view(flow=True)[1:] += (samples[:,:reco.shape[0]] * reco[None,:]).reshape((Hres.axes['bootstrap'].size-1, *shape))
 
+    print("Writing Hunf to", destination)
     with open(destination, 'wb') as f:
         pickle.dump(Hres, f)
-
-    return Hres
-
