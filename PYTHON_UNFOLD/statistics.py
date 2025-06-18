@@ -43,17 +43,15 @@ def condition(x, invhess, slice_start, slice_end, values):
     Hafter_dim1 = Htmp0[:, slice_end:]
 
     H11 = np.concatenate((Hbefore_dim1, Hafter_dim1), axis=1)
-
     H12 = Htmp0[:, slice_start:slice_end]
     H22 = invhess[slice_start:slice_end, slice_start:slice_end]
-
-    print("H11", H11.shape)
-    print("H12", H12.shape)
-    print("H22", H22.shape)
 
     codH22 = eigen.CompleteOrthogonalDecomposition(H22)
 
     newx = xkeep + H12 @ codH22.solve(values - xkill)
 
-    newhess = H11 - H12 @ codH22.solve(H12.T)
+    solved = codH22.solve(H12.T)
+    if len(solved.shape) == 1:
+        solved = solved[None, :]
+    newhess = H11 - H12 @ solved
     return newx, newhess
