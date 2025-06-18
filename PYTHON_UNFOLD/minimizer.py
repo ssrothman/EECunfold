@@ -223,6 +223,9 @@ def run_minimization(LOSS, reco, recoErr,
     res_to_npy(res)
     reco = reco.cpu().detach().numpy()
     recoErr = recoErr.cpu().detach().numpy()
+    LOSS = LOSS.cpu()
+
+    res.namedNuisances = LOSS.namedNuisances
 
     return res, reco, recoErr
 
