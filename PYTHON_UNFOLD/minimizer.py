@@ -209,28 +209,28 @@ def run_minimization(LOSS, reco, recoErr,
         if compute_inv_hess:
             import eigenpy as eigen
             print("Computing inverse Hessian...")
-            codhess = eigen.CompleteOrthogonalDecomposition(res.hess.numpy(force=True))
+            codhess = eigen.CompleteOrthogonalDecomposition(res.hess.cpu().detach().numpy())
             res.invhess = codhess.pseudoInverse()
 
     res_to_npy(res)
-    reco = reco.numpy(force=True)
-    recoErr = recoErr.numpy(force=True)
+    reco = reco.cpu().detach().numpy()
+    recoErr = recoErr.cpu().detach().numpy()
 
     return res, reco, recoErr
 
 def res_to_npy(res):
     for key in res.keys():
         if type(res[key]) is torch.Tensor:
-            res[key] = res[key].numpy(force=True)
+            res[key] = res[key].cpu().detach().numpy()
 
 def dump_result(x, invhess, reco, Htemplate, destination):
     import hist
     import pickle
 
     if type(x) is torch.Tensor:
-        x = x.numpy(force=True)
+        x = x.cpu().detach().numpy()
     if type(reco) is torch.Tensor:
-        reco = reco.numpy(force=True)
+        reco = reco.cpu().detach().numpy()
 
     Hres = Htemplate.copy().reset()
 
