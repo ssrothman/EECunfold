@@ -184,6 +184,7 @@ class FullLoss:
                        transferVarIndices,
                        gamma0, gammaVariations,
                        rho0, rhoVariations,
+                       namedNuisances=None,
                  covmatrix = False):
 
         self.transfer0 = transfer0
@@ -213,6 +214,7 @@ class FullLoss:
             raise ValueError("G, R to have same number of variations")
 
         self.covmatrix = covmatrix
+        self.namedNuisances = namedNuisances
 
         print("nBeta:", self.nBeta)
         print("nTheta:", self.nTheta)

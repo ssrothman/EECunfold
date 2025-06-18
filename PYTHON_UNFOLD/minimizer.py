@@ -79,6 +79,8 @@ def setup_loss(histdict, covmatrix=False,
     if Nboot <= 0:
         Nboot = histdict['reco']['nominal'].axes['bootstrap'].size - 1
 
+    namedNuisances = {}
+
     print("Building stat templates...")
     _, _, rhoboot, gammaboot, _ = get_arrs(histdict, 'nominal', None)
     for iboot in tqdm(range(1, Nboot+1)):
@@ -94,6 +96,7 @@ def setup_loss(histdict, covmatrix=False,
         gammaVariations.append(0.5*(gamma_up - gamma_dn))
         transferVariations.append(0.5*(transfer_up - transfer_dn))
         transferVarIndices.append(len(rhoVariations)-1)
+        namedNuisances[len(rhoVariations)-1] = syst
 
     print("Building one-sided systs...")
     for syst in tqdm(one_sided_systs):
@@ -102,6 +105,7 @@ def setup_loss(histdict, covmatrix=False,
         gammaVariations.append(gamma_up - gamma0)
         transferVariations.append(transfer_up - transfer0)
         transferVarIndices.append(len(rhoVariations)-1)
+        namedNuisances[len(rhoVariations)-1] = syst
 
     rhoVariations = np.asarray(rhoVariations)
     gammaVariations = np.asarray(gammaVariations)
@@ -119,11 +123,15 @@ def setup_loss(histdict, covmatrix=False,
     print("transferVariations", transferVariations.shape)
     print("transferVarIndices: ", transferVarIndices.shape)
     print("\t", transferVarIndices)
+    print("namedNuisances: ")
+    for key in namedNuisances:
+        print("\t", key, namedNuisances[key])
 
     LOSS = loss.FullLoss(transfer0, transferVariations, 
                          transferVarIndices,
                          gamma0, gammaVariations, 
                          rho0, rhoVariations,
+                         namedNuisances = namedNuisances,
                          covmatrix = covmatrix)
 
     torch.set_default_dtype(torch.float64)
