@@ -17,6 +17,7 @@ parser.add_argument('--gen_statK', type=int, default=-1)
 
 parser.add_argument('--run2d', action='store_true')
 parser.add_argument('--x0', type=str, default=None)
+parser.add_argument('--nullx0', action='store_true')
 
 parser.add_argument('--device', type=str, default='cuda')
 parser.add_argument('--gtol', type=float, default=1.0)
@@ -67,16 +68,19 @@ else:
     with open(invcovpath, 'rb') as f:
         recoerr = pickle.load(f)
 
-if args.x0 is None:
-    x0path = os.path.join(datasets.basedir, args.GenTag, args.GenSample,
-                          'EECres4tee', 'CONSTRUCTED_LOSSES',
-                          'MCx0' + gen_suffix)
+if args.nullx0:
+    x0 = None
 else:
-    x0path = args.x0
+    if args.x0 is None:
+        x0path = os.path.join(datasets.basedir, args.GenTag, args.GenSample,
+                              'EECres4tee', 'CONSTRUCTED_LOSSES',
+                              'MCx0' + gen_suffix)
+    else:
+        x0path = args.x0
 
-print("Reading x0 from", x0path)
-with open(x0path, 'rb') as f:
-    x0 = pickle.load(f)
+    print("Reading x0 from", x0path)
+    with open(x0path, 'rb') as f:
+        x0 = pickle.load(f)
 
 loss_base = 'LOSS_2d' if args.run2d else 'LOSS_1d'
 losspath = os.path.join(datasets.basedir, args.GenTag, args.GenSample,
