@@ -247,6 +247,9 @@ class FullLoss:
         beta = x[:self.nBeta]
         theta = x[self.nBeta:]
 
+        negBTerm = 1000*torch.sum(torch.square(beta)[beta<=0])
+        beta = torch.where(beta<0, 0, beta)
+
         fwd = self.forward(beta*reco, theta)
         #print("FWD: ", fwd)
         diff = fwd-reco
@@ -260,7 +263,8 @@ class FullLoss:
 
         cstrTerm = torch.sum(torch.square(x[self.nBeta:]))
         #print("CSTR: ", cstrTerm)
-        return 0.5 * (errTerm + cstrTerm)
+        
+        return 0.5 * (errTerm + cstrTerm) + negBTerm
 
     def one_parameter_loss(self, reco, recoErr):
         if type(reco) is not torch.Tensor:
