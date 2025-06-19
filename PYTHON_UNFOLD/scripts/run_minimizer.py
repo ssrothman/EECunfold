@@ -20,7 +20,7 @@ parser.add_argument('--run2d', action='store_true')
 x0group = parser.add_mutually_exclusive_group(required=False)
 x0group.add_argument('--x0', type=str, default=None)
 x0group.add_argument('--nullx0', action='store_true')
-x0group.add_agument('--goodGuessX0', action='store_true')
+x0group.add_argument('--goodGuessX0', action='store_true')
 
 parser.add_argument('--device', type=str, default='cuda')
 parser.add_argument('--gtol', type=float, default=1.0)

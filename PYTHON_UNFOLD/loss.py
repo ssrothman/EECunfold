@@ -239,7 +239,7 @@ class FullLoss:
 
         denom = np.where(reco == 0, 1, reco)
         x0 = beta0 / denom
-        x0[reco = 0] = 1
+        x0[reco == 0] = 1
 
         return x0
 
