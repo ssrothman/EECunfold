@@ -16,8 +16,11 @@ parser.add_argument('--gen_statN', type=int, default=-1)
 parser.add_argument('--gen_statK', type=int, default=-1)
 
 parser.add_argument('--run2d', action='store_true')
-parser.add_argument('--x0', type=str, default=None)
-parser.add_argument('--nullx0', action='store_true')
+
+x0group = parser.add_mutually_exclusive_group(required=False)
+x0group.add_argument('--x0', type=str, default=None)
+x0group.add_argument('--nullx0', action='store_true')
+x0group.add_agument('--goodGuessX0', action='store_true')
 
 parser.add_argument('--device', type=str, default='cuda')
 parser.add_argument('--gtol', type=float, default=1.0)
@@ -68,8 +71,19 @@ else:
     with open(invcovpath, 'rb') as f:
         recoerr = pickle.load(f)
 
+loss_base = 'LOSS_2d' if args.run2d else 'LOSS_1d'
+losspath = os.path.join(datasets.basedir, args.GenTag, args.GenSample,
+                        'EECres4tee', 'CONSTRUCTED_LOSSES',
+                        loss_base + gen_suffix)
+print("Reading loss from", losspath)
+with open(losspath, 'rb') as f:
+    LOSS = pickle.load(f)
+
 if args.nullx0:
     x0 = None
+elif args.goodGuessX0:
+    print("Calculating good guess for x0")
+    x0 = LOSS.getGoodX0(reco)
 else:
     if args.x0 is None:
         x0path = os.path.join(datasets.basedir, args.GenTag, args.GenSample,
@@ -81,15 +95,6 @@ else:
     print("Reading x0 from", x0path)
     with open(x0path, 'rb') as f:
         x0 = pickle.load(f)
-
-loss_base = 'LOSS_2d' if args.run2d else 'LOSS_1d'
-losspath = os.path.join(datasets.basedir, args.GenTag, args.GenSample,
-                        'EECres4tee', 'CONSTRUCTED_LOSSES',
-                        loss_base + gen_suffix)
-print("Reading loss from", losspath)
-with open(losspath, 'rb') as f:
-    LOSS = pickle.load(f)
-
 import minimizer
 print(reco.shape, reco.dtype)
 print(recoerr.shape, recoerr.dtype)

@@ -220,6 +220,29 @@ class FullLoss:
         print("nTheta:", self.nTheta)
         print("Expecting inverse covariance matrix?", self.covmatrix)
 
+    def getGoodX0(self, reco):
+        T = self.transfer0
+        Rpure = (1 - self.rho0) * reco
+        
+        import eigenpy as eigen
+        if type(T) is torch.Tensor:
+            T = T.cpu().numpy()
+        if type(Rpure) is torch.Tensor:
+            Rpure = Rpure.cpu().numpy()
+        if type(reco) is torch.Tensor:
+            reco = reco.cpu().numpy()
+
+        codT = eigen.CompleteOrthogonalDecomposition(T)
+        Gpure = codT.solve(Rpure)
+        
+        beta0 = (1 + self.gamma0) * Gpure
+
+        denom = np.where(reco == 0, 1, reco)
+        x0 = beta0 / denom
+        x0[reco = 0] = 1
+
+        return x0
+
     def getG(self, theta):
         return self.gamma0 + torch.tensordot(theta, self.gammaVariations, 1)
 
