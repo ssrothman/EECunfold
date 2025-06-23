@@ -119,6 +119,7 @@ MCreco = hists['reco']['nominal'][{'bootstrap' : 0}].values(flow=True).ravel()
 MCgen =   hists['gen']['nominal'][{'bootstrap' : 0}].values(flow=True).ravel()
 MCdenom = np.where(MCreco==0, 1, MCreco)
 MCx0 = MCgen / MCdenom
+MCx0[MCreco == 0] = 1
 
 outpath_x0 = os.path.join(datasets.basedir, args.Tag,
                           args.Sample, 'EECres4tee',

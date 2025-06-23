@@ -14,6 +14,8 @@ from scipy.stats import multivariate_normal
 cut = {}
 tcut = {}
 
+torch.set_default_dtype(torch.float64)
+
 def get_arrs(histdict, syst, iboot):
     the_tcut = tcut.copy()
     the_cut = cut.copy()
@@ -127,14 +129,13 @@ def setup_loss(histdict, covmatrix=False,
     for key in namedNuisances:
         print("\t", key, namedNuisances[key])
 
-    LOSS = loss.FullLoss(transfer0, transferVariations, 
-                         transferVarIndices,
-                         gamma0, gammaVariations, 
-                         rho0, rhoVariations,
-                         namedNuisances = namedNuisances,
-                         covmatrix = covmatrix)
-
-    torch.set_default_dtype(torch.float64)
+    LOSS = loss.FullLoss()
+    LOSS.setup(transfer0, transferVariations, 
+               transferVarIndices,
+               gamma0, gammaVariations, 
+               rho0, rhoVariations,
+               namedNuisances = namedNuisances,
+               covmatrix = covmatrix)
 
     return LOSS
 
