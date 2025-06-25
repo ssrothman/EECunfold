@@ -245,6 +245,7 @@ def dump_result(x, invhess, reco, Htemplate, Nboot, destination):
         reco = reco.cpu().detach().numpy()
 
     invhess = 0.5 * (invhess + invhess.T)  # Ensure symmetry
+    np.fill_diagonal(invhess, np.diagonal(invhess) * 1.001)
 
     axes = []
     for ax in Htemplate.axes:
@@ -265,11 +266,13 @@ def dump_result(x, invhess, reco, Htemplate, Nboot, destination):
 
     shape = list(Htemplate.values(flow=True).shape[1:])
 
+    print(x.shape)
+    print(reco.shape)
     Hres.view(flow=True)[0] += (x[:reco.shape[0]] * reco).reshape(shape)
 
     print("Generating toys from multivariate gaussian...")
-    distr = multivariate_normal(x, invhess, allow_singular=True)
-    samples = distr.rvs(size=(Hres.axes['bootstrap'].size-1,))
+    import statistics
+    samples = statistics.multivariate_gaussian_rvs(x, invhess, Nboot)
 
     Hres.view(flow=True)[1:] += (samples[:,:reco.shape[0]] * reco[None,:]).reshape((Hres.axes['bootstrap'].size-1, *shape))
 

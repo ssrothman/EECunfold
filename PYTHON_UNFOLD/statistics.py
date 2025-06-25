@@ -1,5 +1,5 @@
 import numpy as np
-import eigenpy as eigen
+import fasteigenpy as eigen
 import scipy
 
 def marginalize(x, invhess, slice_start, slice_end):
@@ -32,6 +32,7 @@ def condition(x, invhess, slice_start, slice_end, values):
     If we conditionally set a nuisance to zero that's 
     equivalent to if we never had it, up to the gaussian assumption
     '''
+    print("Conditioning...")
     xkeep = np.concatenate((x[:slice_start], x[slice_end:]), axis=0)
     xkill = x[slice_start:slice_end]
 
@@ -46,12 +47,38 @@ def condition(x, invhess, slice_start, slice_end, values):
     H12 = Htmp0[:, slice_start:slice_end]
     H22 = invhess[slice_start:slice_end, slice_start:slice_end]
 
+    print("H11 shape:", H11.shape)
+    print("H12 shape:", H12.shape)
+    print("H22 shape:", H22.shape)
+
     codH22 = eigen.CompleteOrthogonalDecomposition(H22)
 
-    newx = xkeep + H12 @ codH22.solve(values - xkill)
+    solved = codH22.solve(values - xkill)
+    print("solved shape:", solved.shape)
+    if len(xkill) == 1:
+        newx = xkeep + H12.squeeze() * codH22.solve(values - xkill).squeeze()
+    else:
+        newx = xkeep + H12 @ codH22.solve(values - xkill).squeeze()
 
     solved = codH22.solve(H12.T)
     if len(solved.shape) == 1:
         solved = solved[None, :]
     newhess = H11 - H12 @ solved
     return newx, newhess
+
+def multivariate_gaussian_rvs(mu, Sigma, Nsamples):
+    ldlt_sigma = eigen.LDLT(Sigma)
+    if (ldlt_sigma.info() != eigen.ComputationInfo.Success):
+        print("ERROR")
+        print("LDLT decomposition failed with info:", ldlt_sigma.info())
+        return ldlt_sigma.info()
+
+    PL = ldlt_sigma.matrixPL()
+    D = ldlt_sigma.vectorD()
+    Dsq = np.sqrt(D)
+    Dsq[D<0] = 0
+    L = PL * Dsq[:, None]
+
+    standard_normal = np.random.normal(size=(mu.shape[0], Nsamples))
+
+    return (mu[:, None] + L @ standard_normal).T
