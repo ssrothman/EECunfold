@@ -75,7 +75,8 @@ def get_pickled_histogram(runtag, tag, skimmer, objsyst, wtsyst, whichobj,
                           statN=-1, statK=-1, shuffle_boots=False,
                           boot_per_file=-1,
                           reweight='kinreweight',
-                          max_nboot=-1):
+                          max_nboot=-1,
+                          verbose=False):
     thepath = os.path.join(basedir, runtag, tag, skimmer)
 
     subpaths = os.scandir(thepath)
@@ -131,8 +132,14 @@ def get_pickled_histogram(runtag, tag, skimmer, objsyst, wtsyst, whichobj,
         choice=0
     elif len(options) == 0:
         print("Uh oh no options")
-        print("Looking for %s + %s"%(thepath, '%s_%s_%s'%(whichobj, objsyst, wtsyst)))
-        print(runtag, tag, skimmer, objsyst, wtsyst, whichobj)
+        target = '%s_%s_%s'%(whichobj, objsyst, wtsyst)
+        if statN > 0:
+            target += '_%dstat%d'%(statN, statK)
+        if boot_per_file > 0:
+            target += '_boot%d'%boot_per_file
+        if reweight is not None:
+            target += '_%s'%reweight
+        print("Looking for %s + %s"%(thepath, target))
         raise RuntimeError("No options found for %s + %s"%(thepath, '%s_%s_%s'%(whichobj, objsyst, wtsyst)))
         print()
     else:
@@ -199,7 +206,8 @@ def get_pickled_histogram(runtag, tag, skimmer, objsyst, wtsyst, whichobj,
 
         used_rngs.append(nextrng)
         with open(os.path.join(thepath, subpath.name), 'rb') as f:
-            print(os.path.join(thepath, subpath.name))
+            if verbose:
+                print(os.path.join(thepath, subpath.name))
             Hnext = pickle.load(f)
             if type(Hnext) in [list, tuple]:
                 Hnext = Hnext[0]
@@ -238,19 +246,28 @@ def get_pickled_histogram(runtag, tag, skimmer, objsyst, wtsyst, whichobj,
             expected_sumwt += Hb.sum(flow=True)
         H = Htot
 
-    print("Total weight = %g (expected %g)"%(H.sum(flow=True), expected_sumwt))
     return H
 
 def get_pickled_histogram_sum(tags, xsecs, runtag, skimmer, 
                               objsyst, wtsyst, whichobj,
-                              statN, statK):
+                              statN, statK, shuffle_boots=False, 
+                              boot_per_file=-1, 
+                              reweight='kinreweight', 
+                              max_nboot=-1):
     H = None
     for tag, xsec in zip(tags, xsecs):
+        print("Reading %s (xsec = %g)"%(tag, xsec))
         Hnext = get_pickled_histogram(runtag, tag, skimmer, 
                                       objsyst, wtsyst, whichobj,
-                                      statN, statK)
+                                      statN, statK,
+                                      shuffle_boots=shuffle_boots,
+                                      boot_per_file=boot_per_file,
+                                      reweight=reweight,
+                                      max_nboot=max_nboot,
+                                      verbose=False)
         numevt = get_counts(runtag, tag)
         samplewt = xsec/numevt * 1000
+        print("\tFound H with %d bootstraps" % (Hnext.axes['bootstrap'].size - 1))
 
         if H is None:
             H = (Hnext * samplewt)
