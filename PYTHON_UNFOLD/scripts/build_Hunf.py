@@ -60,7 +60,8 @@ Htemplate = datasets.get_pickled_histogram(args.RecoTag, args.RecoSample,
                                            'reco',
                                            statN=args.reco_statN,
                                            statK=args.reco_statK,
-                                           max_nboot=0)
+                                           max_nboot=0,
+                                           reweight=None)
 
 
 x = res.x
@@ -98,6 +99,13 @@ else:
     print("\tx shape:", x.shape)
     print("\tinvhess shape:", invhess.shape)
 
+syststart = reco.shape[0]
+systend = x.shape[0]
+print("Marginalizing out the rest of the systematics.")
+x, invhess = statistics.marginalize(x, invhess, syststart, systend)
+print("\tx shape:", x.shape)
+print("\tinvhess shape:", invhess.shape)
+
 outname = 'Hunf'
 if args.statonly:
     outname += '_statonly'
@@ -108,7 +116,7 @@ elif args.conditionRange is not None:
 outname += '.pkl'
 
 import minimizer
-minimizer.dump_result(res.x, res.invhess, reco, Htemplate, 2000,
+minimizer.dump_result(x, invhess, reco, Htemplate, 2000,
                       os.path.join(datasets.basedir,
                                    args.RecoTag,
                                    args.RecoSample,

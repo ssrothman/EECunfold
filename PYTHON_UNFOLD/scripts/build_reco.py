@@ -11,12 +11,19 @@ parser.add_argument('--statK', type=int, default=-1)
 parser.add_argument('--wtsyst', type=str, default='nominal')
 parser.add_argument('--objsyst', type=str, default='nominal')
 
+parser.add_argument('--boot_per_file', type=int, default=-1)
+parser.add_argument('--reweight', type=str, default=None)
+
 args = parser.parse_args()
 
 Hreco = datasets.get_pickled_histogram(args.Tag, args.Sample, 'EECres4tee', 
                               args.objsyst, args.wtsyst, 'reco',
                               statN=args.statN, statK=args.statK,
-                              max_nboot=args.max_nboot)
+                              max_nboot=args.max_nboot,
+                              boot_per_file=args.boot_per_file,
+                              reweight=args.reweight,
+                              shuffle_boots=False,
+                              verbose=False)
 
 reco = Hreco[{'bootstrap' : 0}].values(flow=True).ravel()
 
@@ -30,7 +37,7 @@ DY = DY[:args.max_nboot, :]
 cov = DY.T @ DY / DY.shape[0]
 
 print("inverting cov")
-import eigenpy as eigen
+import fasteigenpy as eigen
 codcov = eigen.CompleteOrthogonalDecomposition(cov)
 invcov = codcov.pseudoInverse()
 

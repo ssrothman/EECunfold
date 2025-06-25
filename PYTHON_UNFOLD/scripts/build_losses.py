@@ -5,11 +5,37 @@ import json
 parser = argparse.ArgumentParser(description='Build EEC loss functions')
 parser.add_argument('Tag', type=str)
 parser.add_argument('Sample', type=str)
+
 parser.add_argument('--max_nboot', type=int, default=2000)
+
 parser.add_argument('--statN', type=int, default=-1)
 parser.add_argument('--statK', type=int, default=-1)
 
+parser.add_argument('--boot_per_file', type=int, default=-1)
+parser.add_argument('--reweight', type=str, default=None)
+
 args = parser.parse_args()
+
+import os
+outfile = ''
+outfile += '_boot%d'%args.max_nboot
+if args.statN > 0:
+    outfile += '_%dstat%d'%(args.statN, args.statK)
+outfile += '.pkl'
+import datasets
+outpath_1D = os.path.join(datasets.basedir, args.Tag,
+                          args.Sample, 'EECres4tee', 
+                          'CONSTRUCTED_LOSSES', 'LOSS_1d' + outfile)
+outpath_2D = os.path.join(datasets.basedir, args.Tag,
+                          args.Sample, 'EECres4tee',
+                          'CONSTRUCTED_LOSSES', 'LOSS_2d' + outfile)
+
+if not os.path.exists(os.path.dirname(outpath_1D)):
+    os.makedirs(os.path.dirname(outpath_1D))
+
+if os.path.exists(outpath_1D):
+    print(f"File {outpath_1D} already exists. Exiting to avoid overwriting.")
+    exit(0)
 
 hists = {
     "reco" : {},
@@ -43,7 +69,10 @@ for key in hists.keys():
                                                    key, 
                                                    statN = args.statN, 
                                                    statK = args.statK, 
-                                                   max_nboot=args.max_nboot)
+                                                   max_nboot=args.max_nboot,
+                                                   reweight=args.reweight,
+                                                   shuffle_boots=False,
+                                                   verbose=False)
 
     for objsyst in ['CH_UP', 'CH_DN', 
                     'JES_UP', 'JES_DN', 
@@ -66,7 +95,10 @@ for key in hists.keys():
                                                  key, 
                                                  statN = args.statN, 
                                                  statK = args.statK, 
-                                                 max_nboot=args.max_nboot)
+                                                 max_nboot=args.max_nboot,
+                                                 reweight=args.reweight,
+                                                 shuffle_boots=False,
+                                                 verbose=False)
 
 
 two_sided = ['scale', 'isosf', 'idsf', 'triggersf', 'PU', 'PDF', 'aS', 'PDFaS', 
@@ -86,23 +118,6 @@ LOSS_1d = minimizer.setup_loss(hists, False,
 LOSS_2d = minimizer.setup_loss(hists, True,
                                two_sided_systs=two_sided,
                                one_sided_systs=one_sided)
-
-import os
-outfile = ''
-outfile += '_boot%d'%args.max_nboot
-if args.statN > 0:
-    outfile += '_%dstat%d'%(args.statN, args.statK)
-outfile += '.pkl'
-import datasets
-outpath_1D = os.path.join(datasets.basedir, args.Tag,
-                          args.Sample, 'EECres4tee', 
-                          'CONSTRUCTED_LOSSES', 'LOSS_1d' + outfile)
-outpath_2D = os.path.join(datasets.basedir, args.Tag,
-                          args.Sample, 'EECres4tee',
-                          'CONSTRUCTED_LOSSES', 'LOSS_2d' + outfile)
-
-if not os.path.exists(os.path.dirname(outpath_1D)):
-    os.makedirs(os.path.dirname(outpath_1D))
 
 print("Writing ", outpath_1D)
 with open(outpath_1D, 'wb') as f:

@@ -70,23 +70,28 @@ thecommand = python + ' ' + thecommand
 
 subprocs = []
 print("Running command:", thecommand)
-print("Nominal")
-subprocs.append(subprocess.Popen(shlex.split(thecommand)))
-        #stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
-print("Statonly")
-subprocs.append(subprocess.Popen(shlex.split(thecommand + ' --statonly ')))
+if args.gen_nboot == -1:
+    NMCstat = 4500
+else:
+    NMCstat = args.gen_nboot
+
+for i in range(NMCstat, Nsyst):
+    print(f'syst {i}')
+    subprocs.append(subprocess.run(shlex.split(thecommand + 
+        f' --conditionOne {i}')))
         #stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
 
-for i in range(args.MCstatstep, args.gen_nboot, args.MCstatstep):
+for i in range(args.MCstatstep, NMCstat, args.MCstatstep):
     print(f"MCstat 0 to {i}")
-    subprocs.append(subprocess.Popen(shlex.split(thecommand + 
+    subprocs.append(subprocess.run(shlex.split(thecommand + 
         f' --conditionRange 0 {i}')))
         #stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
 
-for i in range(args.gen_nboot, Nsyst):
-    print(f'syst {i}')
-    subprocs.append(subprocess.Popen(shlex.split(thecommand + 
-        f' --conditionOne {i}')))
+print("Statonly")
+subprocs.append(subprocess.run(shlex.split(thecommand + ' --statonly ')))
+        #stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+print("Nominal")
+subprocs.append(subprocess.run(shlex.split(thecommand)))
         #stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
 
 print("Waiting for completion...")
