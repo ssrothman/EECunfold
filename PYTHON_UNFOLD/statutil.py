@@ -1,5 +1,5 @@
-import numpy as np
 import fasteigenpy as eigen
+import numpy as np
 import scipy
 
 def marginalize(x, invhess, slice_start, slice_end):
@@ -66,19 +66,7 @@ def condition(x, invhess, slice_start, slice_end, values):
     newhess = H11 - H12 @ solved
     return newx, newhess
 
-def multivariate_gaussian_rvs(mu, Sigma, Nsamples):
-    ldlt_sigma = eigen.LDLT(Sigma)
-    if (ldlt_sigma.info() != eigen.ComputationInfo.Success):
-        print("ERROR")
-        print("LDLT decomposition failed with info:", ldlt_sigma.info())
-        return ldlt_sigma.info()
-
-    PL = ldlt_sigma.matrixPL()
-    D = ldlt_sigma.vectorD()
-    Dsq = np.sqrt(D)
-    Dsq[D<0] = 0
-    L = PL * Dsq[:, None]
-
+def multivariate_gaussian_rvs(mu, L, Nsamples):
     standard_normal = np.random.normal(size=(mu.shape[0], Nsamples))
 
     return (mu[:, None] + L @ standard_normal).T

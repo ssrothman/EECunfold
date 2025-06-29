@@ -24,14 +24,8 @@ parser.add_argument('--systlist', type=str, nargs='*',
                              'CH', 'JES', 'JER', 'UNCLUSTERED',
                              'TRK_EFF'])
 
+parser.add_argument('--help_condition', type=float, default=0.001)
 parser.add_argument('--testcut', action='store_true')
-
-mutually_exclusive = parser.add_mutually_exclusive_group(required=False)
-mutually_exclusive.add_argument('--statonly', action='store_true')
-mutually_exclusive.add_argument('--conditionOne', type=int, default=None)
-mutually_exclusive.add_argument('--conditionRange', nargs=2, type=int, default=None)
-
-parser.add_argument('--out_nboot', type=int, default=5000)
 
 args = parser.parse_args()
 
@@ -54,19 +48,8 @@ base_folder = os.path.join(reco_folder, loss_name)
 runs = os.listdir(base_folder)
 runs = filter(lambda x: x.startswith('RUN'), runs)
 
-options = ['--out_nboot', str(args.out_nboot)]
-if args.statonly:
-    options.append('--statonly')
-if args.conditionOne is not None:
-    options.append('--conditionOne')
-    options.append(str(args.conditionOne))
-if args.conditionRange is not None:
-    options.append('--conditionRange')
-    options.append(str(args.conditionRange[0]))
-    options.append(str(args.conditionRange[1]))
-
 import subprocess
 for run in runs:
-    subprocess.run(['python', 'scripts/build_Hunf.py', 
+    subprocess.run(['python', 'scripts/invert_Hessian.py', 
                     os.path.join(base_folder, run),
-                    *options])
+                    '--help_condition', str(args.help_condition)])

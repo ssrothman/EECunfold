@@ -1,6 +1,11 @@
+try:
+    import fasteigenpy as eigen
+except ImportError:
+    print("fasteigenpy not found, using eigenpy instead. This may be slower.")
+    import eigenpy as eigen
+
 import numpy as np
 import unc
-import eigenpy as eigen
 from scipy.optimize import minimize
 from tqdm import tqdm
 import torchmin
@@ -11,12 +16,9 @@ from scipy.stats import multivariate_normal
 #cut = {'pt' : slice(None,None,sum)}
 #tcut = {'pt_reco' : slice(None,None,sum), 'pt_gen' : slice(None,None,sum)}
 
-cut = {}
-tcut = {}
-
 torch.set_default_dtype(torch.float64)
 
-def get_arrs(histdict, syst, iboot):
+def get_arrs(histdict, syst, iboot, cut, tcut):
     the_tcut = tcut.copy()
     the_cut = cut.copy()
     if iboot is not None:
@@ -65,12 +67,15 @@ def get_arrs(histdict, syst, iboot):
 
     return reco, gen, rho, gamma, transfer
 
-def setup_loss(histdict, covmatrix=False, 
+def setup_loss(histdict, 
                Nboot=-1,
                two_sided_systs=[],
-               one_sided_systs=[]):
+               one_sided_systs=[], 
+               cut = {},
+               tcut = {}):
     #nominal
-    reco0, gen0, rho0, gamma0, transfer0 = get_arrs(histdict, 'nominal', 0)
+    reco0, gen0, rho0, gamma0, transfer0 = get_arrs(histdict, 'nominal', 0,
+                                                    cut, tcut)
 
     rhoVariations = []
     gammaVariations = []
@@ -84,7 +89,8 @@ def setup_loss(histdict, covmatrix=False,
     namedNuisances = {}
 
     print("Building stat templates...")
-    _, _, rhoboot, gammaboot, _ = get_arrs(histdict, 'nominal', None)
+    _, _, rhoboot, gammaboot, _ = get_arrs(histdict, 'nominal', None,
+                                           cut, tcut)
     for iboot in tqdm(range(1, Nboot+1)):
         rhoVariations.append((rhoboot[iboot] - rho0)/Nboot)
         gammaVariations.append((gammaboot[iboot] - gamma0)/Nboot)
@@ -92,8 +98,10 @@ def setup_loss(histdict, covmatrix=False,
     #syst variations
     print("Buiding two-sided systs...")
     for syst in tqdm(two_sided_systs):
-        _, _, rho_up, gamma_up, transfer_up = get_arrs(histdict, '%sUp'%syst, 0)
-        _, _, rho_dn, gamma_dn, transfer_dn = get_arrs(histdict, '%sDown'%syst, 0)
+        _, _, rho_up, gamma_up, transfer_up = get_arrs(histdict, '%sUp'%syst, 0,
+                                                       cut, tcut)
+        _, _, rho_dn, gamma_dn, transfer_dn = get_arrs(histdict, '%sDown'%syst, 0,
+                                                       cut, tcut)
         rhoVariations.append(0.5*(rho_up - rho_dn))
         gammaVariations.append(0.5*(gamma_up - gamma_dn))
         transferVariations.append(0.5*(transfer_up - transfer_dn))
@@ -102,7 +110,8 @@ def setup_loss(histdict, covmatrix=False,
 
     print("Building one-sided systs...")
     for syst in tqdm(one_sided_systs):
-        _, _, rho_up, gamma_up, transfer_up = get_arrs(histdict, syst, 0)
+        _, _, rho_up, gamma_up, transfer_up = get_arrs(histdict, syst, 0,
+                                                       cut, tcut)
         rhoVariations.append(rho_up - rho0)
         gammaVariations.append(gamma_up - gamma0)
         transferVariations.append(transfer_up - transfer0)
@@ -134,37 +143,158 @@ def setup_loss(histdict, covmatrix=False,
                transferVarIndices,
                gamma0, gammaVariations, 
                rho0, rhoVariations,
-               namedNuisances = namedNuisances,
-               covmatrix = covmatrix)
+               namedNuisances = namedNuisances)
 
     return LOSS
 
-def run_minimization(LOSS, reco, recoErr, 
-                     method='scan', x0=None,
-                     compute_hessian=False,
-                     compute_inv_hess=False,
-                     device='cuda',
-                     **kwargs):
-
-    if compute_inv_hess:
-        compute_hessian = True
+def compute_hessian(LOSS, reco, recoErr, run2d, x,
+                    device='cuda',
+                    frozen_mask=None,
+                    frozen_vals=None):
 
     if type(device) is str:
         device = torch.device(device)
 
-    recoErr = np.where(recoErr==0, 1, recoErr)
+    if run2d and len(recoErr.shape) != 2:
+        raise ValueError("for run2d, recoErr must be 2d invcov array")
+    if not run2d and len(recoErr.shape) != 1:
+        raise ValueError("for run1d, recoErr must be 1d stderr array")
+
+    if run2d:
+        LOSS.set_2d()
+    else:
+        LOSS.set_1d()
+
+    if type(x) is not torch.Tensor:
+        x = torch.from_numpy(x)
+    if type(reco) is not torch.Tensor:
+        reco = torch.from_numpy(reco)
+    if type(recoErr) is not torch.Tensor:
+        recoErr = torch.from_numpy(recoErr)
+    if LOSS.device == 'numpy':
+        LOSS = LOSS.torch()
+
+    if frozen_mask is not None and type(frozen_mask) is not torch.Tensor:
+        frozen_mask = torch.from_numpy(frozen_mask)
+    if frozen_vals is not None and type(frozen_vals) is not torch.Tensor:
+        frozen_vals = torch.from_numpy(frozen_vals)
+
+    LOSS = LOSS.to(device)
+    x = x.to(device)
+    reco = reco.to(device)
+    recoErr = recoErr.to(device)
+    if frozen_mask is not None:
+        frozen_mask = frozen_mask.to(device)
+        frozen_vals = frozen_vals.to(device)
+
+    if frozen_mask is not None:
+        newx = torch.zeros(LOSS.nBeta + LOSS.nTheta, dtype=x.dtype, device=device)
+        newx[~frozen_mask] = x
+        newx[frozen_mask] = frozen_vals
+        x = newx
+
+    theloss = LOSS.one_parameter_loss(reco, recoErr, None, None)
+
+    return torch.autograd.functional.hessian(theloss, x, vectorize=False).cpu().detach().numpy()
+
+def setup_minimizer_from_run(rundir):
+    import ioutil
+    import os
+
+    if rundir.endswith('/'):
+        rundir = rundir[:-1]
+
+    configdict = ioutil.wrapped_read_json(os.path.join(rundir, 'config.json'))
+
+    lossname = os.path.basename(os.path.dirname(rundir))
+
+    import datasets
+    import filenames
+    losstag, losssample, _, _, _, _, _, _ = filenames.parse_loss_name(lossname)
+    losspath = os.path.join(datasets.basedir, losstag, losssample, 
+                            'EECres4tee', 'CONSTRUCTED_LOSSES', 
+                            lossname)
+
+    import loss
+    LOSS = loss.FullLoss()
+    LOSS.read_from_disk(losspath)
+
+    if os.path.exists(os.path.join(rundir, 'minimization_result')):
+        completed=True
+        x = read_minimization_result(os.path.join(rundir, 'minimization_result'))
+    else:
+        completed=False
+        #find most recent checkpoint
+        import os
+        checkpointdir = os.path.join(rundir, 'checkpoints')
+        checkpoints = os.listdir(checkpointdir)
+        checkpoints = filter(lambda x: x.startswith('cpt_') and x.endswith('.npy'), checkpoints)
+        cpt_ids = [int(x.split('_')[1].split('.')[0]) for x in checkpoints]
+        maxid = max(cpt_ids)
+        print("Loading most recent checkpoint #%d"%maxid)
+        x = ioutil.wrapped_read_np(os.path.join(checkpointdir, 'cpt_%03d.npy' % maxid))
+        x = (x, maxid)
+
+    return completed, LOSS, configdict, x
+
+def run_minimization(LOSS, reco, recoErr,
+                     run2d=False,
+                     method='scan', 
+                     x0=None,
+                     device='cuda',
+                     frozen_mask=None,
+                     frozen_vals=None,
+                     logpath=None,
+                     cpt_interval=50,
+                     cpt_start=0,
+                     **kwargs):
+
+    if type(device) is str:
+        device = torch.device(device)
+
+    if run2d and len(recoErr.shape) != 2:
+        raise ValueError("for run2d, recoErr must be 2d invcov array")
+    if not run2d and len(recoErr.shape) != 1:
+        raise ValueError("for run1d, recoErr must be 1d stderr array")
 
     if x0 is None:
-        x0 = torch.from_numpy(np.ones(LOSS.nBeta, dtype=reco.dtype))
-        t0 = torch.from_numpy(np.zeros(LOSS.nNuisances(), dtype=reco.dtype))
-        x0 = torch.cat((x0, t0), dim=0)
+        x0 = np.ones(LOSS.nBeta, dtype=np.float64)
+        t0 = np.zeros(LOSS.nTheta, dtype=np.float64)
+        x0 = np.concatenate((x0, t0), axis=0)
+    elif len(x0) == LOSS.nBeta:
+        t0 = np.zeros(LOSS.nTheta, dtype=np.float64)
+        x0 = np.concatenate((x0, t0), axis=0)
+
+    if run2d:
+        LOSS.set_2d()
+    else:
+        LOSS.set_1d()
 
     if type(x0) is not torch.Tensor:
         x0 = torch.from_numpy(x0)
+    if type(reco) is not torch.Tensor:
+        reco = torch.from_numpy(reco)
+    if type(recoErr) is not torch.Tensor:
+        recoErr = torch.from_numpy(recoErr)
+    if LOSS.device == 'numpy':
+        LOSS = LOSS.torch()
 
-    if x0.shape[0] == LOSS.nBeta:
-        t0 = torch.zeros(LOSS.nNuisances())
-        x0 = torch.cat((x0, t0), dim=0)
+    if frozen_mask is not None and type(frozen_mask) is not torch.Tensor:
+        frozen_mask = torch.from_numpy(frozen_mask)
+    if frozen_vals is not None and type(frozen_vals) is not torch.Tensor:
+        frozen_vals = torch.from_numpy(frozen_vals)
+
+    LOSS = LOSS.to(device)
+    x0 = x0.to(device)
+    reco = reco.to(device)
+    recoErr = recoErr.to(device)
+
+    if frozen_mask is not None:
+        frozen_mask = frozen_mask.to(device)
+        frozen_vals = frozen_vals.to(device)
+
+    if frozen_mask is not None:
+        x0 = x0[~frozen_mask]
 
     if method == 'scan':
         methodlist = ['bfgs', 'l-bfgs', 'cg', 'newton-cg', 'newton-exact', 
@@ -172,31 +302,30 @@ def run_minimization(LOSS, reco, recoErr,
     else:
         methodlist = [method]
         
-    LOSS = LOSS.torch()
+    theloss_tofit = LOSS.one_parameter_loss(reco, recoErr,
+                                            frozen_mask=frozen_mask,
+                                            frozen_vals=frozen_vals)
 
-    LOSS = LOSS.to(device)
-    if type(reco) is not torch.Tensor:
-        reco = torch.from_numpy(reco)
-    reco = reco.to(device)
-    if type(recoErr) is not torch.Tensor:
-        recoErr = torch.from_numpy(recoErr)
-    recoErr = recoErr.to(device)
-    theloss = LOSS.one_parameter_loss(reco, recoErr)
-    if type(x0) is not torch.Tensor:
-        x0 = torch.from_numpy(x0)
-    x0 = x0.to(device)
+    if logpath is None:
+        cpt_path = None
+    else:
+        import os
+        cpt_path = os.path.join(logpath, 'checkpoints')
 
     for method in methodlist:
         try:
             from time import time
             print(method)
             print("starting minimization")
-            print("initial loss = %g"%theloss(x0).item())
+            print("initial loss = %g"%theloss_tofit(x0).item())
             t0 = time()
             res = torchmin.minimize(
-                    theloss, x0 = x0,
+                    theloss_tofit, x0 = x0,
                     method = method,
-                    callback = lambda x : print("LOSS:", theloss(x).item()),
+                    callback = StatusCallback(theloss_tofit,
+                                              cpt_interval=cpt_interval,
+                                              cpt_path=cpt_path,
+                                              cpt_start=cpt_start),
                     options = kwargs,
             )
             print("\tt =", time()-t0)
@@ -211,31 +340,121 @@ def run_minimization(LOSS, reco, recoErr,
             traceback.print_exc()
             continue
 
-    if compute_hessian:
-        print("Computing Hessian...")
-        res.hess = torch.autograd.functional.hessian(theloss, res.x, vectorize=False)
-
-        if compute_inv_hess:
-            import eigenpy as eigen
-            print("Computing inverse Hessian...")
-            codhess = eigen.CompleteOrthogonalDecomposition(res.hess.cpu().detach().numpy())
-            res.invhess = codhess.pseudoInverse()
-
     res_to_npy(res)
     reco = reco.cpu().detach().numpy()
     recoErr = recoErr.cpu().detach().numpy()
-    LOSS = LOSS.cpu()
+    LOSS = LOSS.cpu().detach().numpy()
+    x0 = x0.cpu().detach().numpy()
 
     res.namedNuisances = LOSS.namedNuisances
 
-    return res, reco, recoErr
+    return res, reco, recoErr, x0
 
-def res_to_npy(res):
+def res_to_npy(res): 
     for key in res.keys():
         if type(res[key]) is torch.Tensor:
             res[key] = res[key].cpu().detach().numpy()
 
-def dump_result(x, invhess, reco, Htemplate, Nboot, destination):
+class StatusCallback:
+    def __init__(self, lossfunc, cpt_interval=1000, cpt_start=0, cpt_path=None):
+        self.lossfunc = lossfunc
+        self.counter = 0
+        self.cpt_interval = cpt_interval
+        self.cpt_path = cpt_path
+        self.cpt_start = cpt_start
+        if cpt_path is not None:
+            import os
+            os.makedirs(cpt_path, exist_ok=True)
+
+    def __call__(self, x):
+        import os
+        import ioutil
+
+        print("LOSS:", self.lossfunc(x).item())
+        self.counter += 1
+        if self.cpt_path is not None and self.counter % self.cpt_interval == 0:
+            print("\tcheckpointing...")
+            icpt = self.counter // self.cpt_interval
+            icpt += self.cpt_start
+            ipath = os.path.join(self.cpt_path, 'cpt_%03d.npy' % icpt)
+            ioutil.wrapped_write_np(ipath, x.cpu().detach().numpy())
+
+def write_minimization_result(res, reco, recoErr, x0, destination):
+    import ioutil
+    import os
+    arrays = []
+    structs = []
+    os.makedirs(destination, exist_ok=True)
+    for key in res.keys():
+        if isinstance(res[key], np.ndarray) and np.prod(res[key].shape) > 0:
+            arrays.append(key)
+        else:
+            structs.append(key)
+
+    for name in arrays:
+        ioutil.wrapped_write_np(
+            os.path.join(destination, name + '.npy'), res[name]
+        )
+
+    ioutil.wrapped_write_np(
+        os.path.join(destination, 'RECO.npy'), reco
+    )
+    ioutil.wrapped_write_np(
+        os.path.join(destination, 'RECOERR.npy'), recoErr
+    )
+    ioutil.wrapped_write_np(
+        os.path.join(destination, 'X0.npy'), x0
+    )
+
+    structdict = {}
+    for name in structs:
+        structdict[name] = res[name]
+
+    structdict['arrays'] = arrays
+    ioutil.wrapped_write_json(
+        os.path.join(destination, 'structs.json'), structdict
+    )
+
+def read_minimization_result(destination, silent=False):
+    from collections import namedtuple
+    import os
+    import ioutil
+    structs = ioutil.wrapped_read_json(
+        os.path.join(destination, 'structs.json'),
+        silent=silent
+    )
+    arrays = {}
+    for name in structs['arrays']:
+        arrays[name] = ioutil.wrapped_read_np(
+            os.path.join(destination, name + '.npy'),
+            silent=silent
+        )
+
+    reco = ioutil.wrapped_read_np(
+        os.path.join(destination, 'RECO.npy'),
+        silent=silent
+    )
+    recoErr = ioutil.wrapped_read_np(
+        os.path.join(destination, 'RECOERR.npy'),
+        silent=silent
+    )
+    x0 = ioutil.wrapped_read_np(
+        os.path.join(destination, 'X0.npy'),
+        silent=silent
+    )
+
+    res = {}
+    for name in structs:
+        if name == 'arrays':
+            continue
+        res[name] = structs[name]
+    for name in arrays:
+        res[name] = arrays[name]
+
+    res = namedtuple('MinimizationResult', res.keys())(*res.values())
+    return res, reco, recoErr, x0
+
+def dump_result(x, invhess_L, reco, Htemplate, Nboot, destination):
     import hist
     import pickle
 
@@ -243,9 +462,6 @@ def dump_result(x, invhess, reco, Htemplate, Nboot, destination):
         x = x.cpu().detach().numpy()
     if type(reco) is torch.Tensor:
         reco = reco.cpu().detach().numpy()
-
-    invhess = 0.5 * (invhess + invhess.T)  # Ensure symmetry
-    np.fill_diagonal(invhess, np.diagonal(invhess) * 1.001)
 
     axes = []
     for ax in Htemplate.axes:
@@ -266,16 +482,14 @@ def dump_result(x, invhess, reco, Htemplate, Nboot, destination):
 
     shape = list(Htemplate.values(flow=True).shape[1:])
 
-    print(x.shape)
-    print(reco.shape)
-    Hres.view(flow=True)[0] += (x[:reco.shape[0]] * reco).reshape(shape)
+    Hres.view(flow=True)[0] += (x * reco).reshape(shape)
 
     print("Generating toys from multivariate gaussian...")
-    import statistics
-    samples = statistics.multivariate_gaussian_rvs(x, invhess, Nboot)
+    import statutil
+    samples = statutil.multivariate_gaussian_rvs(x, invhess_L, Nboot)
 
-    Hres.view(flow=True)[1:] += (samples[:,:reco.shape[0]] * reco[None,:]).reshape((Hres.axes['bootstrap'].size-1, *shape))
+    Hres.view(flow=True)[1:] += (samples * reco[None,:]).reshape((Hres.axes['bootstrap'].size-1, *shape))
 
     print("Writing Hunf to", destination)
-    with open(destination, 'wb') as f:
-        pickle.dump(Hres, f)
+    import ioutil
+    ioutil.wrapped_write_pickle(destination, Hres)

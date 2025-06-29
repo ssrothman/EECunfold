@@ -1,75 +1,77 @@
 import argparse
-import datasets
-import numpy as np
+import fasteigenpy as eigen
 
 parser = argparse.ArgumentParser(description='Build EEC reco histograms')
 parser.add_argument('Tag', type=str)
 parser.add_argument('Sample', type=str)
-parser.add_argument('--max_nboot', type=int, default=2000)
+parser.add_argument('--nboot', type=int, default=-1)
 parser.add_argument('--statN', type=int, default=-1)
 parser.add_argument('--statK', type=int, default=-1)
+parser.add_argument('--firstN', type=int, default=-1)
 parser.add_argument('--wtsyst', type=str, default='nominal')
 parser.add_argument('--objsyst', type=str, default='nominal')
 
-parser.add_argument('--boot_per_file', type=int, default=-1)
+parser.add_argument('--boot_per_file', type=int, nargs='+', default=[-1])
 parser.add_argument('--reweight', type=str, default=None)
+
+parser.add_argument('--force', action='store_true')
+
+parser.add_argument('--testcut', action='store_true')
 
 args = parser.parse_args()
 
-Hreco = datasets.get_pickled_histogram(args.Tag, args.Sample, 'EECres4tee', 
-                              args.objsyst, args.wtsyst, 'reco',
-                              statN=args.statN, statK=args.statK,
-                              max_nboot=args.max_nboot,
-                              boot_per_file=args.boot_per_file,
-                              reweight=args.reweight,
-                              shuffle_boots=False,
-                              verbose=False)
+import filenames
+import datasets
+import numpy as np
+import os
+import ioutil
+
+Hreco = datasets.get_pickled_histogram(
+        args.Tag, args.Sample, 'EECres4tee', 
+        args.objsyst, args.wtsyst, 'reco',
+        statN=args.statN, statK=args.statK,
+        boot_per_file=args.boot_per_file,
+        firstN=args.firstN, 
+        reweight=args.reweight,
+        max_nboot = args.nboot)
+
+if args.nboot >= 0:
+    Hreco = Hreco[{'bootstrap' : slice(None, args.nboot+1)}]
+if args.testcut:
+    Hreco = Hreco[{'pt' : slice(None,None,sum)}]
+
+actual_nboot = Hreco.axes['bootstrap'].size - 1
+
+recofolder = filenames.reco_folder(
+        args.Tag, args.Sample, actual_nboot,
+        args.statN, args.statK, args.firstN,
+        args.objsyst, args.wtsyst, args.testcut
+)
+if os.path.exists(recofolder) and not args.force:
+    print(f"Folder {recofolder} already exists. Use --force to overwrite.")
+    import sys
+    sys.exit(0)
+
+os.makedirs(recofolder, exist_ok=True)
 
 reco = Hreco[{'bootstrap' : 0}].values(flow=True).ravel()
+ioutil.wrapped_write_np(os.path.join(recofolder, 'RECO.npy'), reco)
 
 import unc
-DY = unc.dymat(Hreco, norm=True)
-if args.max_nboot > DY.shape[0]:
-    raise RuntimeError(f"Not enough bootstrap samples: {DY.shape[0]} < {args.max_nboot}")
-
 print("building cov")
-DY = DY[:args.max_nboot, :]
+DY = unc.dymat(Hreco, norm=True)
 cov = DY.T @ DY / DY.shape[0]
+ioutil.wrapped_write_np(os.path.join(recofolder, 'COV.npy'), cov)
+
+err1D = np.sqrt(np.diag(cov))
+err1D[np.diag(cov) <= 0] = 1
+ioutil.wrapped_write_np(os.path.join(recofolder, 'ERR1D.npy'), err1D)
 
 print("inverting cov")
-import fasteigenpy as eigen
 codcov = eigen.CompleteOrthogonalDecomposition(cov)
 invcov = codcov.pseudoInverse()
+ioutil.wrapped_write_np(os.path.join(recofolder, 'INVCOV.npy'), invcov)
 
-import pickle
-import os
-
-outfile = ''
-outfile += '_boot%d'%args.max_nboot
-if args.statN > 0:
-    outfile += '_%dstat%d'%(args.statN, args.statK)
-outfile += '.pkl'
-covpath = os.path.join(datasets.basedir, args.Tag, args.Sample,
-                       'EECres4tee', 'CONSTRUCTED_RECO',
-                       'cov' + outfile)
-invcovpath = os.path.join(datasets.basedir, args.Tag, args.Sample,
-                          'EECres4tee', 'CONSTRUCTED_RECO',
-                          'invcov' + outfile)
-recopath = os.path.join(datasets.basedir, args.Tag, args.Sample,
-                        'EECres4tee', 'CONSTRUCTED_RECO',
-                        'reco' + outfile)
-
-if not os.path.exists(os.path.dirname(covpath)):
-    os.makedirs(os.path.dirname(covpath))
-
-print("Writing ", covpath)
-with open(covpath, 'wb') as f:
-    pickle.dump(cov, f)
-
-print("Writing ", invcovpath)
-with open(invcovpath, 'wb') as f:
-    pickle.dump(invcov, f)
-
-print("Writing ", recopath)
-with open(recopath, 'wb') as f:
-    pickle.dump(reco, f)
+err2D = 1/np.sqrt(np.diag(invcov))
+err2D[np.diag(invcov) <= 0] = 1
+ioutil.wrapped_write_np(os.path.join(recofolder, 'ERR2D.npy'), err2D)

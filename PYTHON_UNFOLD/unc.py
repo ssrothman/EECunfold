@@ -1,3 +1,4 @@
+import fasteigenpy as eigen
 import numpy as np
 import hist
 
@@ -44,7 +45,6 @@ def cov(H, clamp=True):
 def invcov(H, clamp=True):
     covmat = cov(H, clamp=clamp)
 
-    import eigenpy as eigen
     decomp = eigen.CompleteOrthogonalDecomposition(covmat)
     invcov = decomp.solve(np.eye(covmat.shape[0]))
 

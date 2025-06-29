@@ -1,5 +1,15 @@
+#we need to import fasteigenpy BEFORE torch
+#otherwise some fuckery happens when torch imports mkl
+#which in turn breaks fasteigenpy
+#I think this is related to openmp somehow??
+try:
+    import fasteigenpy as eigen
+except ImportError:
+    print("WARNING: NO FASTEIGENPY")
+
 import numpy as np
 import torch
+import ioutil
 
 class FullLoss:
     '''
@@ -26,14 +36,14 @@ class FullLoss:
     TODO: is the 1/2 correct?
     '''
     def __init__(self):
+        self.device = 'numpy'
         pass
 
     def setup(self, transfer0, transferVariations, 
               transferVarIndices,
               gamma0, gammaVariations,
               rho0, rhoVariations,
-              namedNuisances=None,
-              covmatrix = False):
+              namedNuisances=None):
 
         self.transfer0 = transfer0
         self.gamma0 = gamma0
@@ -61,56 +71,77 @@ class FullLoss:
         if gammaVariations.shape[0] != rhoVariations.shape[0]:
             raise ValueError("G, R to have same number of variations")
 
-        self.covmatrix = covmatrix
         self.namedNuisances = namedNuisances
 
         print("nBeta:", self.nBeta)
         print("nTheta:", self.nTheta)
-        print("Expecting inverse covariance matrix?", self.covmatrix)
+
+    def __str__(self):
+        result = ''
+        result += "FullLoss:\n"
+        for name in self.arrays:
+            result += '\t' + name + str(getattr(self, name).shape) + '\n'
+            if name == 'transferVarIndices':
+                result += '\t\t' + str(getattr(self, name)) + '\n'
+        result += '\n'
+        result += '\tnBeta: ' + str(self.nBeta) + '\n'
+        result += '\tnTheta: ' + str(self.nTheta) + '\n'
+        result += '\tnTransfer: ' + str(self.nTransfer) + '\n'
+
+        result += '\n\tnamedNuisances:\n'
+        for key in self.namedNuisances:
+            result += '\t\t' + self.namedNuisances[key] + ':' + str(key) + '\n'
+
+        return result
+        
 
     def write_to_disk(self, path):
-        import os.path
+        import os
+        print("Writing loss to", path)
+        os.makedirs(path, exist_ok=True)
+
         self.cpu().detach().numpy()
 
         for name in self.arrays:
-            with open(os.path.join(path, f"{name}.npy"), 'wb') as f:
-                print("Writing", name, "to", f.name)
-                np.save(f, getattr(self, name))
+            ioutil.wrapped_write_np(os.path.join(path, f"{name}.npy"),
+                                    getattr(self, name))
 
-        with open(os.path.join(path, "features.pkl"), 'wb') as f:
-            print("Writing features to", f.name)
-            pickle.dump({
+        ioutil.wrapped_write_json(os.path.join(path, "features.json"),
+            {
                 'arrays' : self.arrays,
                 'nBeta': self.nBeta,
                 'nTheta': self.nTheta,
                 'nTransfer': self.nTransfer,
-                'covmatrix': self.covmatrix,
                 'namedNuisances': self.namedNuisances
-            }, f)
+            })
 
     def read_from_disk(self, path):
         import os.path
-        import pickle
 
-        with open(os.path.join(path, "features.pkl"), 'rb') as f:
-            print("Reading features from", f.name)
-            features = pickle.load(f)
+        features = ioutil.wrapped_read_json(os.path.join(path, "features.json"))
 
         self.arrays = features['arrays']
         self.nBeta = features['nBeta']
         self.nTheta = features['nTheta']
         self.nTransfer = features['nTransfer']
-        self.covmatrix = features['covmatrix']
         self.namedNuisances = features['namedNuisances']
 
         for name in self.arrays:
-            print("Reading", name, "from", os.path.join(path, f"{name}.npy"))
-            with open(os.path.join(path, f"{name}.npy"), 'rb') as f:
-                setattr(self, name, np.load(f))
+            setattr(self, name, ioutil.wrapped_read_np(os.path.join(path, f"{name}.npy")))
+
+    def set_1d(self):
+        self.covmatrix = False
+
+    def set_2d(self):
+        self.covmatrix = True
 
     def getGoodX0(self, reco):
         print("Building good x0 guess by inverting transfer matrix...")
+        print("reco shape:", reco.shape)
+        print("\tsum:", reco.sum())
         T = self.transfer0
+        print("T shape:", T.shape)
+        print("\tsum:", T.sum())
 
         # rho = recoBkg / (reco - recoBkg) 
         # -> recoBkg = rho * (reco - recoBkg)
@@ -120,8 +151,9 @@ class FullLoss:
 
         recoBkgGuess = self.rho0 * reco / (1 + self.rho0)
         Rpure = reco - recoBkgGuess
+        print("Rpure shape:", Rpure.shape)
+        print("\tsum:", Rpure.sum())
         
-        import eigenpy as eigen
         if type(T) is torch.Tensor:
             T = T.cpu().numpy()
         if type(Rpure) is torch.Tensor:
@@ -130,7 +162,9 @@ class FullLoss:
             reco = reco.cpu().numpy()
 
         codT = eigen.CompleteOrthogonalDecomposition(T)
-        Gpure = codT.solve(Rpure)
+        Gpure = codT.solve(Rpure).squeeze()
+        print("Gpure shape:", Gpure.shape)
+        print("\tsum:", Gpure.sum())
         
         # gamma = genBkg / gen
         # -> genBkg = gamma * gen
@@ -138,10 +172,14 @@ class FullLoss:
         # -> (gen - genBkg) = gen * (1 - gamma)
         # -> gen = (gen - genBkg) / (1 - gamma)
         beta0 = Gpure / (1 - self.gamma0)
+        print("beta0 shape:", beta0.shape)
+        print("\tsum:", beta0.sum())
 
         denom = np.where(reco == 0, 1, reco)
         x0 = beta0 / denom
         x0[reco == 0] = 1
+        print("x0 shape:", x0.shape)
+        print("\tsum:", x0.sum())
 
         return x0
 
@@ -174,7 +212,8 @@ class FullLoss:
         beta = x[:self.nBeta]
         theta = x[self.nBeta:]
 
-        negBTerm = 1000*torch.sum(torch.square(beta)[beta<=0])
+        negB = torch.where(beta < 0, beta, 0)
+        negBTerm = 1000*torch.sum(torch.square(negB))
         beta = torch.where(beta<0, 0, beta)
 
         fwd = self.forward(beta*reco, theta)
@@ -188,12 +227,28 @@ class FullLoss:
             errTerm = torch.sum(torch.square(diff/recoErr))
         #print("ERR: ", errTerm)
 
-        cstrTerm = torch.sum(torch.square(x[self.nBeta:]))
+        cstrTerm = torch.sum(torch.square(theta))
         #print("CSTR: ", cstrTerm)
         
         return 0.5 * (errTerm + cstrTerm) + negBTerm
 
-    def one_parameter_loss(self, reco, recoErr):
+    def loss_with_frozen(self, x, reco, recoErr, 
+                         frozen_mask=None, 
+                         frozen_vals=None):
+        if frozen_mask is None or torch.sum(frozen_mask)==0:
+            return self.loss(x, reco, recoErr)
+        else:
+            newx = torch.zeros(self.nBeta + self.nTheta,
+                               dtype=x.dtype,
+                               device=x.device)
+            newx[frozen_mask] = frozen_vals
+            newx[~frozen_mask] = x
+            return self.loss(newx, reco, recoErr)
+
+    def one_parameter_loss(self, reco, recoErr,
+                           frozen_mask=None,
+                           frozen_vals=None):
+
         if type(reco) is not torch.Tensor:
             reco = torch.from_numpy(reco)
         if type(recoErr) is not torch.Tensor:
@@ -202,10 +257,9 @@ class FullLoss:
         reco = reco.to(self.transfer0.device)
         recoErr = recoErr.to(self.transfer0.device)
 
-        return lambda x: self.loss(x, reco, recoErr)
-
-    def nNuisances(self):
-        return self.nTheta
+        return lambda x: self.loss_with_frozen(x, reco, recoErr,
+                                               frozen_mask,
+                                               frozen_vals)
 
     def get_beta(self, x):
         return x[:self.nBeta]
@@ -215,7 +269,11 @@ class FullLoss:
 
     def numpy(self, *args, **kwargs):
         for name in self.arrays:
+            if type(getattr(self, name)) is not torch.Tensor:
+                continue
             setattr(self, name, getattr(self, name).numpy(*args, **kwargs))
+
+        self.device = 'numpy'
 
         return self
 
@@ -224,11 +282,17 @@ class FullLoss:
             if type(getattr(self, name)) is not torch.Tensor:
                 setattr(self, name, torch.from_numpy(getattr(self, name)))
 
+        self.device = 'cpu'
+
         return self
 
     def cpu(self):
         for name in self.arrays:
+            if type(getattr(self, name)) is not torch.Tensor:
+                continue
             setattr(self, name, getattr(self, name).cpu())
+
+        self.device = 'cpu'
 
         return self
 
@@ -236,14 +300,22 @@ class FullLoss:
         for name in self.arrays:
             setattr(self, name, getattr(self, name).cuda())
 
+        self.device = 'cuda'
+
         return self
 
     def to(self, device):
         for name in self.arrays:
             setattr(self, name, getattr(self, name).to(device))
 
+        self.device = device
+
         return self
 
     def detach(self):
         for name in self.arrays:
+            if type(getattr(self, name)) is not torch.Tensor:
+                continue
             setattr(self, name, getattr(self, name).detach())
+
+        return self
