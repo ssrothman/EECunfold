@@ -18,12 +18,13 @@ parser.add_argument('--two_sided', type=str, nargs='*',
 parser.add_argument('--one_sided', type=str, nargs='*',
                     default=['TRK_EFF'])
 
+parser.add_argument('--projectAxes', type=str, nargs='*', default=None)
+
 parser.add_argument('--boot_per_file', type=int, default=-1, nargs='+')
 parser.add_argument('--reweight', type=str, default=None)
+parser.add_argument('--r123type', type=str, default=None)
 
 parser.add_argument('--force', action='store_true')
-
-parser.add_argument('--testcut', action='store_true')
 
 parser.add_argument('--which_objsysts', type=str, nargs='*',
                     default=['JER', 'JES', 'UNCLUSTERED', 'CH', 'TRK_EFF'],
@@ -32,9 +33,9 @@ parser.add_argument('--which_objsysts', type=str, nargs='*',
 
 args = parser.parse_args()
 
-import datasets
 import os
 import numpy as np
+import filenames
 import ioutil
 
 hists = {
@@ -47,17 +48,25 @@ hists = {
     "transfer" : {}
 }
 
+if args.projectAxes is not None:
+    toproj =  ['bootstrap'] + args.projectAxes
+    toproj_t = ['bootstrap']
+    for ax in args.projectAxes:
+        toproj_t.append(ax+'_reco')
+        toproj_t.append(ax+'_gen')
+
 for what in hists.keys():
     print("Loading %s %s"%(what, 'nominal'))
-    hists[what]['nominal'] = datasets.get_pickled_histogram(
-            args.Tag, args.Sample, 'EECres4tee', 
-            'nominal', 'nominal', what, 
-            statN = args.statN, statK = args.statK,
-            firstN = args.firstN,
-            boot_per_file=args.boot_per_file,
+    hists[what]['nominal'] = filenames.get_full_hist(
+            args.Tag, args.Sample, args.boot_per_file,
+            args.statN, args.statK, args.firstN, 
+            'nominal', 'nominal', what,
+            args.reweight, args.r123type,
             max_nboot=args.nboot,
-            reweight=args.reweight)
-
+            from_bkp=args.Sample != 'Pythia_HTsum',
+            silent=True
+    )
+            
     if args.nboot >= 0 and what != 'transfer':
         if hists[what]['nominal'].axes['bootstrap'].size < args.nboot + 1:
             raise ValueError(
@@ -66,6 +75,12 @@ for what in hists.keys():
                 "Check your dataset and the number of bootstraps available.")
 
         hists[what]['nominal'] = hists[what]['nominal'][{'bootstrap' : slice(None, args.nboot+1)}]
+
+    if args.projectAxes is not None:
+        if what == 'transfer':
+            hists[what]['nominal'] = hists[what]['nominal'].project(*toproj_t)
+        else:
+            hists[what]['nominal'] = hists[what]['nominal'].project(*toproj)
 
 lowest_nboot = np.inf
 if args.nboot <= 0:
@@ -87,7 +102,8 @@ import filenames
 outpath = filenames.loss_folder(
     args.Tag, args.Sample, actual_nboot,
     args.statN, args.statK, args.firstN,
-    args.two_sided + args.one_sided, args.testcut)
+    args.two_sided + args.one_sided, 
+    args.projectAxes, False)
 
 if os.path.exists(outpath) and not args.force:
     print(f"Folder {outpath} already exists. Use --force to overwrite.")
@@ -109,28 +125,40 @@ for what in hists.keys():
         UPDNnames = [''] if wtsyst in args.one_sided else ['Up', 'Down']
         for updn, updnname in zip(UPDN, UPDNnames):
             print("Loading %s %s"%(what, wtsyst+updn))
-            hists[what][wtsyst + updnname] = datasets.get_pickled_histogram(
-                args.Tag, args.Sample, 'EECres4tee',
-                'nominal', wtsyst + updn, what,
-                statN = args.statN, statK = args.statK,
-                boot_per_file=args.boot_per_file,
-                max_nboot=0,
-                firstN=args.firstN,
-                reweight=args.reweight)
+            hists[what][wtsyst + updnname] = filenames.get_full_hist(
+                args.Tag, args.Sample, args.boot_per_file,
+                args.statN, args.statK, args.firstN,
+                wtsyst + updn, 'nominal', what,
+                args.reweight, args.r123type,
+                max_nboot=args.nboot,
+                from_bkp=args.Sample != 'Pythia_HTsum',
+                silent=True
+            )
+            if args.projectAxes is not None:
+                if what == 'transfer':
+                    hists[what][wtsyst+updnname] = hists[what][wtsyst+updnname].project(*toproj_t)
+                else:
+                    hists[what][wtsyst+updnname] = hists[what][wtsyst+updnname].project(*toproj)
 
     for objsyst in objsysts_to_load:
         UPDN = [''] if objsyst in args.one_sided else ['_UP', '_DN']
         UPDNnames = [''] if objsyst in args.one_sided else ['Up', 'Down']
         for updn, updnname in zip(UPDN, UPDNnames):
             print("Loading %s %s"%(what, objsyst+updn))
-            hists[what][objsyst + updnname] = datasets.get_pickled_histogram(
-                args.Tag, args.Sample, 'EECres4tee',
+            hists[what][objsyst + updnname] = filenames.get_full_hist(
+                args.Tag, args.Sample, args.boot_per_file,
+                args.statN, args.statK, args.firstN,
                 objsyst + updn, 'nominal', what,
-                statN = args.statN, statK = args.statK,
-                boot_per_file=args.boot_per_file,
-                max_nboot=0,
-                firstN=args.firstN,
-                reweight=args.reweight)
+                args.reweight, args.r123type,
+                max_nboot=args.nboot,
+                from_bkp=args.Sample != 'Pythia_HTsum',
+                silent=True
+            )
+            if args.projectAxes is not None:
+                if what == 'transfer':
+                    hists[what][objsyst+updnname] = hists[what][objsyst+updnname].project(*toproj_t)
+                else:
+                    hists[what][objsyst+updnname] = hists[what][objsyst+updnname].project(*toproj)
 
 import minimizer
 import numpy as np
@@ -140,10 +168,6 @@ import pickle
 
 thecut = {}
 thetcut = {}
-if args.testcut:
-    thecut = {'pt' : slice(None,None,sum)}
-    thetcut = {'pt_reco' : slice(None,None,sum), 
-                'pt_gen' : slice(None,None,sum)}
 
 print("SETUP LOSS")
 LOSS = minimizer.setup_loss(hists, 

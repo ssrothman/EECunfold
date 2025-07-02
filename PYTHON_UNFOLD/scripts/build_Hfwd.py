@@ -5,10 +5,10 @@ parser.add_argument('Rundir', type=str)
 
 parser.add_argument("--out_nboot", type=int, default=5000)
 
-mutually_exclusive = parser.add_mutually_exclusive_group(required=False)
-mutually_exclusive.add_argument('--statonly', action='store_true')
-mutually_exclusive.add_argument('--conditionOne', type=int, default=None)
-mutually_exclusive.add_argument('--conditionRange', nargs=2, type=int, default=None)
+parser.add_argument('--device', type=str, default='cuda')
+
+freeze_group = parser.add_mutually_exclusive_group(required=False)
+freeze_group.add_argument('--freezeAllNuisances', action='store_true')
 
 parser.add_argument('--force', action='store_true')
 
@@ -19,13 +19,14 @@ if args.Rundir[-1] == '/':
 
 import os
 
-outname = 'Hunf_boot%d' % args.out_nboot
-if args.statonly:
-    outname += '_statonly'
-elif args.conditionOne is not None:
-    outname += '_cond%d' % args.conditionOne
-elif args.conditionRange is not None:
-    outname += '_cond%d-%d' % (args.conditionRange[0], args.conditionRange[1])
+outname = 'Hfwd_boot%d' % args.out_nboot
+if args.freezeAllNuisances:
+    raise NotImplementedError
+    outname += '_freezeAll'
+    freezeMode = 'freezeAll'
+else:
+    freezeMode = 'no'
+
 outname += '.pkl'
 resultpath = os.path.join(args.Rundir, 'minimization_result', outname)
 
@@ -34,13 +35,12 @@ if os.path.exists(resultpath) and not args.force:
     import sys
     sys.exit(0)
 
-reconame = os.path.basename(os.path.dirname(os.path.dirname(args.Rundir)))
-
 import filenames
 import datasets
 import minimizer
 import ioutil
 
+reconame = os.path.basename(os.path.dirname(os.path.dirname(args.Rundir)))
 tag, sample, _, statN, statK, firstN, objsyst, wtsyst, projectAxes = filenames.parse_reco_name(reconame)
 
 Htemplate = filenames.get_full_hist(
@@ -65,27 +65,22 @@ L = ioutil.wrapped_read_np(
     os.path.join(args.Rundir, 'minimization_result', 'INVHESS_L.npy'),
 )
 
-import statutil
+_, LOSS, configdict, _ = minimizer.setup_minimizer_from_run(args.Rundir)
 
-if args.statonly:
-    raise NotImplementedError()
-elif args.conditionOne is not None:
-    raise NotImplementedError()
-elif args.conditionRange is not None:
-    raise NotImplementedError()
+import numpy as np
+xfull = np.zeros(LOSS.nBeta + LOSS.nTheta, dtype=x.dtype)
+if 'frozen_mask' in configdict:
+    frozen_mask = np.asarray(configdict['frozen_mask'], dtype=bool)
+    frozen_vals = np.asarray(configdict['frozen_vals'], dtype=x.dtype)
+    xfull[frozen_mask] = frozen_vals
+    xfull[~frozen_mask] = x
 else:
-    print("Not conditioning out any systematics.")
-    print("\tx shape:", x.shape)
-    print("\tHinv shape:", Hinv.shape)
-    print("\tL shape:", L.shape)
+    xfull = x
 
-print("Marginalizing out the rest of the systematics.")
-x = x[:len(reco)]
-Hinv = Hinv[:len(reco), :len(reco)]
-L = L[:len(reco), :len(reco)]
-print("\tx shape:", x.shape)
-print("\tHinv shape:", Hinv.shape)
-print("\tL shape:", L.shape)
+print("xfull.shape", xfull.shape)
+print("L.shape", L.shape)
 
 import minimizer
-minimizer.dump_result(x, L, reco, Htemplate, args.out_nboot, resultpath)
+minimizer.dump_Hfwd(LOSS, xfull, L, reco, Htemplate, args.out_nboot, resultpath, 
+                    device=args.device)
+

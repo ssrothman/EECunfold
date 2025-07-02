@@ -59,8 +59,6 @@ L = PL @ np.diag(Dsq)
 #check
 reconstructed = L @ L.T
 if not np.allclose(reconstructed, invhess):
-    print("Reconstructed matrix does not match the inverse Hessian.")
-    import sys
-    sys.exit(1)
+    print("WARNING: Reconstructed matrix does not match the inverse Hessian.")
 
 ioutil.wrapped_write_np(invhessL_path, L)

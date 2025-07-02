@@ -12,10 +12,11 @@ parser.add_argument('--statN', type=int, default=-1)
 parser.add_argument('--statK', type=int, default=-1)
 parser.add_argument('--firstN', type=int, default=-1)
 
-parser.add_argument('--boot_per_file', type=int, default=[25, 500], nargs='+')
+parser.add_argument('--boot_per_file', type=int, default=-1)
 parser.add_argument('--max_nboot', type=int, default=-1)
 
 parser.add_argument('--reweight', type=str, default=None)
+parser.add_argument('--r123type', type=str, default=None)
 
 parser.add_argument('--outputtag', type=str, default='Pythia_HTsum')
 
@@ -37,16 +38,37 @@ with open("config/datasets.json", 'rb') as f:
 dsets = datasets_config['StacksMC']['HT']['dsets']
 xsecs = [datasets_config['DatasetsMC'][dset]['xsec'] for dset in dsets]
 
+import filenames
 import datasets
 
-H = datasets.get_pickled_histogram_sum(
-        dsets, xsecs, args.Runtag, args.Skimmer,
+H = None
+total_nboot = args.max_nboot
+for dset, xsec in zip(dsets, xsecs):
+    numevt = datasets.get_counts(args.Runtag, dset)
+    samplewt = xsec * 1000 / numevt 
+
+    Hnext = filenames.get_full_hist(
+        args.Runtag, dset, args.boot_per_file,
+        args.statN, args.statK, args.firstN,
         args.Objsyst, args.Wtsyst, args.what,
-        statN=args.statN, statK=args.statK,
-        firstN=args.firstN,
-        boot_per_file=args.boot_per_file,
-        reweight=args.reweight,
-        max_nboot=args.max_nboot)
+        args.reweight, args.r123type,
+        max_nboot = total_nboot,
+        silent=args.mute
+    )
+    if H is None:
+        H = Hnext * samplewt
+    else:
+        if H.axes['bootstrap'].size < Hnext.axes['bootstrap'].size:
+            Hnext = Hnext[{'bootstrap' : slice(None, H.axes['bootstrap'].size)}]
+        elif H.axes['bootstrap'].size > Hnext.axes['bootstrap'].size:
+            H = H[{'bootstrap' : slice(None, Hnext.axes['bootstrap'].size)}]
+
+        H += samplewt * Hnext
+
+    if total_nboot > 0:
+        total_nboot = min(total_nboot, Hnext.axes['bootstrap'].size - 1)
+    else:
+        total_nboot = Hnext.axes['bootstrap'].size - 1
 
 import os
 outfile = '%s_%s_%s'%(args.what, args.Objsyst, args.Wtsyst)
@@ -60,6 +82,9 @@ if args.firstN > 0:
     outfile += '_first%d' % args.firstN
 if args.reweight is not None:
     outfile += '_%s' % args.reweight
+if args.r123type is not None:
+    outfile += '_%s' % args.r123type
+
 outfile += "_HTSUM.pkl"
 
 output_path = os.path.join(datasets.basedir, args.Runtag, 

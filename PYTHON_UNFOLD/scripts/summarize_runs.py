@@ -24,7 +24,8 @@ parser.add_argument('--systlist', type=str, nargs='*',
                              'CH', 'JES', 'JER', 'UNCLUSTERED',
                              'TRK_EFF'])
 
-parser.add_argument('--testcut', action='store_true')
+parser.add_argument('--projectAxes', type=str, nargs='*', default=None,)
+parser.add_argument('--smoothed', action='store_true',)
 
 args = parser.parse_args()
 
@@ -37,12 +38,12 @@ import numpy as np
 reco_folder = filenames.reco_folder(
     args.RecoTag, args.RecoSample, args.reco_nboot,
     args.reco_statN, args.reco_statK, args.reco_firstN,
-    args.reco_objsyst, args.reco_wtsyst, args.testcut
+    args.reco_objsyst, args.reco_wtsyst, args.projectAxes
 )
 loss_folder = filenames.loss_folder(
     args.GenTag, args.GenSample, args.gen_nboot,
     args.gen_statN, args.gen_statK, args.gen_firstN,
-    args.systlist, args.testcut
+    args.systlist, args.projectAxes, args.smoothed
 )
 loss_name = os.path.basename(loss_folder)
 
@@ -61,8 +62,8 @@ for run in runs:
     if finished:
         res = minimizer.read_minimization_result(os.path.join(base_folder, run, 'minimization_result'), silent=True)
 
-        fun = "%6.3f"%res[0].fun
-        gnorm = "%6.4f"%np.sum(np.square(res[0].grad))
+        fun = "%6.3g"%res[0].fun
+        gnorm = "%6.4g"%np.sum(np.square(res[0].grad))
         if 'freezeMode' not in runconfig:
             runconfig['freezeMode'] = 'no'
         elif runconfig['freezeMode'] == 'freezeAllNuisances':
@@ -91,6 +92,11 @@ for run in runs:
         if len(Hunfs) > 0:
             for Hunf in Hunfs:
                 print("\t", Hunf)
+        Hfwds = os.listdir(os.path.join(base_folder, run, 'minimization_result'))
+        Hfwds = list(filter(lambda x: x.startswith('Hfwd'), Hfwds))
+        if len(Hfwds) > 0:
+            for Hfwd in Hfwds:
+                print("\t", Hfwd)
 
 print()
 print("Basedir:")

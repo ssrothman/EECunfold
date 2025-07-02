@@ -9,7 +9,6 @@ parser.add_argument('--force', action='store_true')
 args = parser.parse_args()
 
 import os
-import filenames
 import loss
 import datasets
 import minimizer

@@ -24,14 +24,17 @@ parser.add_argument('--systlist', type=str, nargs='*',
                              'CH', 'JES', 'JER', 'UNCLUSTERED',
                              'TRK_EFF'])
 
-parser.add_argument('--testcut', action='store_true')
+parser.add_argument('--projectAxes', type=str, nargs='*', default=None,)
 
 mutually_exclusive = parser.add_mutually_exclusive_group(required=False)
 mutually_exclusive.add_argument('--statonly', action='store_true')
 mutually_exclusive.add_argument('--conditionOne', type=int, default=None)
 mutually_exclusive.add_argument('--conditionRange', nargs=2, type=int, default=None)
 
+parser.add_argument('--smoothed', action='store_true',)
+
 parser.add_argument('--out_nboot', type=int, default=5000)
+parser.add_argument('--force', action='store_true')
 
 args = parser.parse_args()
 
@@ -41,12 +44,12 @@ import os
 reco_folder = filenames.reco_folder(
     args.RecoTag, args.RecoSample, args.reco_nboot,
     args.reco_statN, args.reco_statK, args.reco_firstN,
-    args.reco_objsyst, args.reco_wtsyst, args.testcut
+    args.reco_objsyst, args.reco_wtsyst, args.projectAxes
 )
 loss_folder = filenames.loss_folder(
     args.GenTag, args.GenSample, args.gen_nboot,
     args.gen_statN, args.gen_statK, args.gen_firstN,
-    args.systlist, args.testcut
+    args.systlist, args.projectAxes, args.smoothed
 )
 loss_name = os.path.basename(loss_folder)
 
@@ -64,6 +67,9 @@ if args.conditionRange is not None:
     options.append('--conditionRange')
     options.append(str(args.conditionRange[0]))
     options.append(str(args.conditionRange[1]))
+
+if args.force:
+    options.append('--force')
 
 import subprocess
 for run in runs:

@@ -24,10 +24,14 @@ parser.add_argument('--systlist', type=str, nargs='*',
                              'CH', 'JES', 'JER', 'UNCLUSTERED',
                              'TRK_EFF'])
 
-parser.add_argument('--device', type=str, default='cuda')
-parser.add_argument('--projectAxes', type=str, nargs='*', default=None)
+parser.add_argument('--projectAxes', type=str, nargs='*', default=None,)
 
 parser.add_argument('--smoothed', action='store_true',)
+
+parser.add_argument('--device', type=str, default='cuda')
+parser.add_argument('--out_nboot', type=int, default=5000)
+parser.add_argument('--freezeAllNuisances', action='store_true')
+parser.add_argument('--force', action='store_true')
 
 args = parser.parse_args()
 
@@ -50,8 +54,18 @@ base_folder = os.path.join(reco_folder, loss_name)
 runs = os.listdir(base_folder)
 runs = filter(lambda x: x.startswith('RUN'), runs)
 
+options = []
+if args.freezeAllNuisances:
+    raise NotImplementedError("Freeze all nuisances is not implemented yet.")
+    options.append('--freezeAllNuisances')
+if args.force:
+    options.append('--force')
+
 import subprocess
 for run in runs:
-    subprocess.run(['python', 'scripts/compute_hessian.py', 
+    subprocess.run(['python', 'scripts/build_Hfwd.py', 
                     os.path.join(base_folder, run),
-                    '--device', args.device])
+                    '--device', args.device,
+                    '--out_nboot', str(args.out_nboot),
+                    *options])
+

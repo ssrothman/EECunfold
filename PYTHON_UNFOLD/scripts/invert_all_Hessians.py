@@ -25,7 +25,9 @@ parser.add_argument('--systlist', type=str, nargs='*',
                              'TRK_EFF'])
 
 parser.add_argument('--help_condition', type=float, default=0.001)
-parser.add_argument('--testcut', action='store_true')
+parser.add_argument('--projectAxes', type=str, nargs='*', default=None)
+
+parser.add_argument('--smoothed', action='store_true',)
 
 args = parser.parse_args()
 
@@ -35,12 +37,12 @@ import os
 reco_folder = filenames.reco_folder(
     args.RecoTag, args.RecoSample, args.reco_nboot,
     args.reco_statN, args.reco_statK, args.reco_firstN,
-    args.reco_objsyst, args.reco_wtsyst, args.testcut
+    args.reco_objsyst, args.reco_wtsyst, args.projectAxes
 )
 loss_folder = filenames.loss_folder(
     args.GenTag, args.GenSample, args.gen_nboot,
     args.gen_statN, args.gen_statK, args.gen_firstN,
-    args.systlist, args.testcut
+    args.systlist, args.projectAxes, args.smoothed
 )
 loss_name = os.path.basename(loss_folder)
 

@@ -37,7 +37,7 @@ parser.add_argument('--statN', type=int, default=-1)
 parser.add_argument('--statK', type=int, default=-1)
 parser.add_argument('--firstN', type=int, default=-1)
 
-parser.add_argument('--boot_per_file', type=int, default=[25, 500], nargs='+')
+parser.add_argument('--boot_per_file', type=int, default=-1)
 parser.add_argument('--max_nboot', type=int, default=-1)
 parser.add_argument('--reweight', type=str, default=None)
 
@@ -58,7 +58,7 @@ def make_command(objsyst, wtsyst, what):
         '--statN', str(args.statN),
         '--statK', str(args.statK),
         '--firstN', str(args.firstN),
-        '--boot_per_file', *shlex.split(' '.join(map(str, args.boot_per_file))),
+        '--boot_per_file', str(args.boot_per_file),
         '--max_nboot', str(args.max_nboot),
         '--outputtag', args.outputtag,
         '--mute'

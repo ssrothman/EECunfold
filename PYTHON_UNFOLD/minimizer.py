@@ -210,7 +210,7 @@ def setup_minimizer_from_run(rundir):
 
     import datasets
     import filenames
-    losstag, losssample, _, _, _, _, _, _ = filenames.parse_loss_name(lossname)
+    losstag, losssample, _, _, _, _, _, _, _ = filenames.parse_loss_name(lossname)
     losspath = os.path.join(datasets.basedir, losstag, losssample, 
                             'EECres4tee', 'CONSTRUCTED_LOSSES', 
                             lossname)
@@ -454,6 +454,59 @@ def read_minimization_result(destination, silent=False):
     res = namedtuple('MinimizationResult', res.keys())(*res.values())
     return res, reco, recoErr, x0
 
+def build_template_hist(Htemplate, nboot):
+    import hist
+    axes = []
+    for ax in Htemplate.axes:
+        if ax.name == 'bootstrap':
+            axes.append(hist.axis.Integer(
+                0, nboot+1, 
+                label='bootstrap',
+                name='bootstrap',
+                underflow=False, overflow=False
+            ))
+        else:
+            axes.append(ax)
+
+    return hist.Hist(
+        *axes,
+        storage=hist.storage.Double(),         
+    )
+
+def dump_Hfwd(LOSS, x, invhess_L, reco, Htemplate, Nboot, destination,
+              device='cuda'):
+    import hist
+    import pickle
+
+    Hres = build_template_hist(Htemplate, Nboot)
+    shape = list(Hres.values(flow=True).shape[1:])
+
+    beta = x[:LOSS.nBeta] * reco
+    theta = x[LOSS.nBeta:] 
+
+    beta = torch.from_numpy(beta).to(device)
+    theta = torch.from_numpy(theta).to(device)
+    reco = torch.from_numpy(reco).to(device)
+    LOSS = LOSS.torch().to(device)
+
+    fwd = LOSS.forward(beta, theta)
+    Hres.view(flow=True)[0] += fwd.detach().cpu().numpy().reshape(shape)
+
+    import statutil
+    print("Generating toys from multivariate gaussian...")
+    samples = statutil.multivariate_gaussian_rvs(x, invhess_L, Nboot)
+    samples = torch.from_numpy(samples).to(device)
+    from tqdm import tqdm
+    for iboot in tqdm(range(Nboot)):
+        beta = samples[iboot, :LOSS.nBeta] * reco
+        beta[beta< 0] = 0
+        theta = samples[iboot, LOSS.nBeta:]
+        fwd = LOSS.forward(beta, theta)
+        Hres.view(flow=True)[iboot+1] += fwd.cpu().detach().numpy().reshape(shape)
+
+    import ioutil
+    ioutil.wrapped_write_pickle(destination, Hres)
+
 def dump_result(x, invhess_L, reco, Htemplate, Nboot, destination):
     import hist
     import pickle
@@ -463,33 +516,17 @@ def dump_result(x, invhess_L, reco, Htemplate, Nboot, destination):
     if type(reco) is torch.Tensor:
         reco = reco.cpu().detach().numpy()
 
-    axes = []
-    for ax in Htemplate.axes:
-        if ax.name == 'bootstrap':
-            axes.append(hist.axis.Integer(
-                0, Nboot+1, 
-                label='bootstrap',
-                name='bootstrap',
-                underflow=False, overflow=False
-            ))
-        else:
-            axes.append(ax)
-
-    Hres = hist.Hist(
-        *axes,
-        storage=hist.storage.Double(),         
-    )
-
-    shape = list(Htemplate.values(flow=True).shape[1:])
+    Hres = build_template_hist(Htemplate, Nboot)
+    shape = list(Hres.values(flow=True).shape[1:])
 
     Hres.view(flow=True)[0] += (x * reco).reshape(shape)
 
     print("Generating toys from multivariate gaussian...")
     import statutil
     samples = statutil.multivariate_gaussian_rvs(x, invhess_L, Nboot)
+    samples[samples < 0] = 0  # Ensure non-negative samples
 
     Hres.view(flow=True)[1:] += (samples * reco[None,:]).reshape((Hres.axes['bootstrap'].size-1, *shape))
 
-    print("Writing Hunf to", destination)
     import ioutil
     ioutil.wrapped_write_pickle(destination, Hres)

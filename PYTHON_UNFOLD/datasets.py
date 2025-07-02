@@ -190,6 +190,8 @@ def get_pickled_histogram(runtag, tag, skimmer,
 
     nomfile = os.path.join(thepath, maybe_chose_option(options, user_input=False))
 
+    if verbose:
+        print("Reading nominal file: %s" % nomfile)
     H = try_to_read_pkl(nomfile)
 
     if type(H) in [list, tuple]:

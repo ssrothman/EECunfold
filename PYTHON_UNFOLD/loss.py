@@ -11,6 +11,154 @@ import numpy as np
 import torch
 import ioutil
 
+def map_to_indices(start, offset, maxval):
+    result = start + offset
+    result = torch.where(result < 0, -1 - result, result)
+    result = torch.where(result >= maxval, 2 * maxval - result - 1, result)
+    #for i in range(len(offset)):
+    #    print("%d + %d -> %d" % (start, offset[i], result[i]))
+    return result
+
+def smooth_Tmat_score_2d(T2d, model, monotonic_weight=1):
+    #model is a 1D array, representing transfered mass to bin indices -Nm to +Nm
+    #T2d is the 2D transfer matrix with shape (Nreco, Ngen) [not necessarily square]
+    #indexed according to T2d(iReco, iGen) = flow from iGen -> iReco
+
+    if len(model) % 2 == 0:
+        raise ValueError("Model must have odd length (ie from -N to +N)")
+    
+    if len(T2d.shape) != 2:
+        raise ValueError("T2d must be a 2D array")
+
+    Nm = len(model) // 2
+    Nreco = T2d.shape[0]
+    Ngen = T2d.shape[1]
+
+    starts = torch.arange(Ngen, dtype=torch.int32)[None, :]  # shape (1, Ngen)
+    offsets = torch.arange(-Nm, Nm+1, dtype=torch.int32)[:, None]  # shape (2*Nm+1, 1)
+    Gindices = map_to_indices(starts, offsets, Ngen)
+
+    T2d_pred = torch.zeros((Nreco, Ngen), dtype=T2d.dtype, device=T2d.device)
+    
+    #this is the equivalent to something like np.add.at
+    T2d_pred.index_put_((Gindices, starts), model[:,None], accumulate=True)
+
+    #now we define a loss function...
+    loss = torch.sum(torch.square(T2d_pred - T2d))
+
+    if monotonic_weight > 0:
+        # Add a monotonicity penalty
+        # We want the model to be monotonic, so we penalize negative slopes
+        slopes_right = model[Nm:-1] - model[Nm+1:]
+        slopes_left = model[1:Nm] - model[0:Nm-1]
+
+        penalty = torch.sum(torch.relu(-slopes_right)) + torch.sum(torch.relu(-slopes_left))
+        loss += monotonic_weight * penalty
+
+    return loss
+
+def optimize_T2d_model(T2d, Nm=5):
+    theloss = lambda model: smooth_Tmat_score_2d(T2d, model)
+    import torchmin
+    x0 = torch.zeros(2 * Nm+1, dtype=T2d.dtype, device=T2d.device)
+    x0[Nm] = 1.0
+    res = torchmin.minimize(
+        theloss, x0=x0,
+        method='l-bfgs',
+        callback = lambda x: print("Loss: %g" % theloss(x)),
+    )
+    return res
+
+def t3d_pred(Np, Nm, Nreco, Ngen, model):
+    starts = torch.arange(Ngen, dtype=torch.int32)[None, None, :]  # shape (1, 1, Ngen)
+    offsets = torch.arange(-Nm, Nm+1, dtype=torch.int32)[None,:,None]  # shape (2*Nm+1, 1, 1)
+    Gindices = map_to_indices(starts, offsets, Ngen)
+
+    T3d_pred = torch.zeros((Np, Nreco, Ngen), dtype=model.dtype, device=model.device)
+
+    #this is the equivalent to something like np.add.at
+    T3d_pred.index_put_((torch.arange(Np)[:, None, None], Gindices, starts),
+                        model[:, :, None], accumulate=True)
+
+    return T3d_pred
+
+def smooth_Tmat_score_3d(T3d, model, monotonic_weight=0):
+    '''
+    Basically solve Np 2d problems in parallel
+
+    model is a 2D array of shape (Np, 2*Nm+1)
+        representing Np x (transfered mass to bin indices -Nm to +Nm) arrays
+    T3d is a 3D array of shape (Np, Nreco, Ngen)
+    '''
+    if T3d.shape[0] != model.shape[0]:
+        raise ValueError("T3d and model must have the same first dimension")
+    if len(model.shape) != 2:
+        raise ValueError("Model must be a 2D array")
+    if len(T3d.shape) != 3:
+        raise ValueError("T3d must be a 3D array")
+
+    Np = T3d.shape[0]
+    Nm = model.shape[1] // 2
+    Nreco = T3d.shape[1]
+    Ngen = T3d.shape[2]
+
+    T3d_pred = t3d_pred(Np, Nm, Nreco, Ngen, model)
+
+    loss = torch.sum(torch.square(T3d_pred - T3d))
+
+    if monotonic_weight > 0:
+        # Add a monotonicity penalty
+        # We want the model to be monotonic, so we penalize negative slopes
+        slopes_right = model[:, Nm:-1] - model[:, Nm+1:]
+        slopes_left = model[:, 1:Nm] - model[:, 0:Nm-1]
+
+        penalty = torch.sum(torch.relu(-slopes_right)) + torch.sum(torch.relu(-slopes_left))
+        loss += monotonic_weight * penalty
+
+    return loss
+
+def setup_Tdiagfit(T0, Nm=5, device='cuda'):
+    T = T0.reshape((7, 5, 15, 15, 7, 5, 15, 15))
+    Tdiag = np.einsum('abciabcj->abcij', T)
+    Tdiag = Tdiag.reshape((-1, 15, 15))
+
+    Tdiag = torch.from_numpy(Tdiag).to(device)
+    x0 = torch.zeros((Tdiag.shape[0], 2 * Nm + 1), dtype=Tdiag.dtype, device=Tdiag.device)
+    x0[:, Nm] = 1.0  # Set the central value to 1.0
+    theloss = lambda model: smooth_Tmat_score_3d(Tdiag, model, monotonic_weight=0)
+    import torchmin
+    res = torchmin.minimize(
+        theloss, x0=x0,
+        method='l-bfgs',
+        callback=lambda x: print("Loss: %g" % theloss(x.reshape(-1, 2 * Nm + 1))),
+    )
+    # Reshape the result back to the original shape
+
+    final_pred = t3d_pred(Tdiag.shape[0], Nm, Tdiag.shape[1], Tdiag.shape[2], res.x)
+    final_pred = final_pred.reshape((7, 5, 15, 15, 15)).numpy(force=True)
+    eyeA = np.eye(7, dtype=final_pred.dtype)
+    eyeB = np.eye(5, dtype=final_pred.dtype)
+    eyeC = np.eye(15, dtype=final_pred.dtype)
+    bigeye = np.einsum('au,bv,cw->abcuvw', eyeA, eyeB, eyeC)[:,:,:,None,:,:,:,None]
+    final_pred = np.einsum('abcij,au,bv,cw->abciuvwj', final_pred, eyeA, eyeB, eyeC)
+    final_pred = np.where(bigeye==1, final_pred, T)
+    final_pred = final_pred.reshape(T0.shape)
+    return res, final_pred
+
+def smooth_the_loss(LOSS):
+    if LOSS.device != 'numpy':
+        LOSS = LOSS.cpu().detach().numpy()
+
+    res, TP = setup_Tdiagfit(LOSS.transfer0, Nm=5)
+    LOSS.transfer0 = TP
+    print("Transfer0 optimized:", res.success, res.message, res.fun.item())
+    for i in range(LOSS.transferVariations.shape[0]):
+        print(f"Optimizing TransferVariation {i}...")
+        res, TP = setup_Tdiagfit(LOSS.transferVariations[i], Nm=5)
+        LOSS.transferVariations[i] = TP
+        print(f"TransferVariation {i} optimized:", res.success, res.message, res.fun.item())
+    return LOSS
+
 class FullLoss:
     '''
     This is the full Loss model we use. The forward model works as follows:
@@ -190,7 +338,10 @@ class FullLoss:
         return self.rho0 + torch.tensordot(theta, self.rhoVariations, 1)
 
     def getT(self, theta):
-        return self.transfer0 + torch.tensordot(theta[self.transferVarIndices], self.transferVariations, 1) 
+        if len(self.transferVarIndices) > 0:
+            return self.transfer0 + torch.tensordot(theta[self.transferVarIndices], self.transferVariations, 1) 
+        else:
+            return self.transfer0
 
     def genBkg(self, beta, theta):
         return self.getG(theta) * beta

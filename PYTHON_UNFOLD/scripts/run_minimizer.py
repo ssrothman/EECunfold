@@ -38,12 +38,13 @@ x0group.add_argument('--goodGuessX0', action='store_true')
 x0group.add_argument('--MCx0', action='store_true')
 
 parser.add_argument('--device', type=str, default='cuda')
-parser.add_argument('--method', type=str, default='trust-ncg')
+parser.add_argument('--method', type=str, default='l-bfgs')
 parser.add_argument('--method_kwargs', type=str, nargs='*', default=[])
 
 parser.add_argument("--checkpoint_interval", type=int, default=50)
 
-parser.add_argument('--testcut', action='store_true')
+parser.add_argument('--projectAxes', type=str, nargs='*', default=None,)
+parser.add_argument('--smoothed', action='store_true')
 
 freezegroup = parser.add_mutually_exclusive_group(required=False)
 freezegroup.add_argument('--freezeAllNuisances', action='store_true')
@@ -85,12 +86,12 @@ import ioutil
 reco_folder = filenames.reco_folder(
     args.RecoTag, args.RecoSample, args.reco_nboot,
     args.reco_statN, args.reco_statK, args.reco_firstN,
-    args.reco_objsyst, args.reco_wtsyst, args.testcut
+    args.reco_objsyst, args.reco_wtsyst, args.projectAxes
 )
 loss_folder = filenames.loss_folder(
     args.GenTag, args.GenSample, args.gen_nboot,
     args.gen_statN, args.gen_statK, args.gen_firstN,
-    args.systlist, args.testcut
+    args.systlist, args.projectAxes, args.smoothed
 )
 loss_name = os.path.basename(loss_folder)
 
