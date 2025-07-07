@@ -53,6 +53,7 @@ if args.projectAxes is not None:
     toproj_t = ['bootstrap']
     for ax in args.projectAxes:
         toproj_t.append(ax+'_reco')
+    for ax in args.projectAxes:
         toproj_t.append(ax+'_gen')
 
 for what in hists.keys():
@@ -173,8 +174,8 @@ print("SETUP LOSS")
 LOSS = minimizer.setup_loss(hists, 
                             two_sided_systs=args.two_sided,
                             one_sided_systs=args.one_sided,
-                            cut=thecut,
-                            tcut=thetcut)
+                            cut={},
+                            tcut={})
 
 LOSS.write_to_disk(outpath)
 
