@@ -70,3 +70,35 @@ def multivariate_gaussian_rvs(mu, L, Nsamples):
     standard_normal = np.random.normal(size=(mu.shape[0], Nsamples))
 
     return (mu[:, None] + L @ standard_normal).T
+
+def inverse_from_eigenspectrum(solver, 
+                               clip_lowest_N=0,
+                               force_positive=True,
+                               return_sqrt=False):
+    eigenvals = solver.eigenvalues().copy()
+    eigenvecs = solver.eigenvectors()
+
+    if force_positive:
+        eigenvals = np.where(eigenvals < 0, 0, eigenvals)
+
+    if clip_lowest_N > 0:
+        eigenvals[:clip_lowest_N] = 0
+
+    denom = np.where(eigenvals == 0, 1, eigenvals)
+    inv_eigenvals = 1 / denom
+
+    inv_eigenvals = np.where(eigenvals == 0, 0, inv_eigenvals)
+
+    reconstructed = eigenvecs @ np.diag(eigenvals) @ eigenvecs.T
+    inverse = eigenvecs @ np.diag(inv_eigenvals) @ eigenvecs.T
+        
+    if return_sqrt:
+        sqrt_inv_eigenvals = np.sqrt(inv_eigenvals)
+        sqrt_eigenvals = np.sqrt(eigenvals)
+
+        sqrt_reconstructed = eigenvecs @ np.diag(sqrt_eigenvals)
+        sqrt_inverse = eigenvecs @ np.diag(sqrt_inv_eigenvals)
+
+        return inverse, reconstructed, sqrt_inverse, sqrt_reconstructed
+    else:
+        return inverse, reconstructed
