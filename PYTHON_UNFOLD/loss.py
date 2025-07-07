@@ -368,18 +368,14 @@ class FullLoss:
         beta = torch.where(beta<0, 0, beta)
 
         fwd = self.forward(beta*reco, theta)
-        #print("FWD: ", fwd)
         diff = fwd-reco
-        #print("DIFF: ", diff)
 
         if self.covmatrix:
             errTerm = torch.linalg.multi_dot((diff, recoErr, diff))
         else:
             errTerm = torch.sum(torch.square(diff/recoErr))
-        #print("ERR: ", errTerm)
 
         cstrTerm = torch.sum(torch.square(theta))
-        #print("CSTR: ", cstrTerm)
         
         return 0.5 * (errTerm + cstrTerm) + negBTerm
 
