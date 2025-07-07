@@ -3,10 +3,17 @@ import argparse
 parser = argparse.ArgumentParser(description='Run the minimizer for EEC reconstruction')
 parser.add_argument('Rundir', type=str)
 
-parser.add_argument('--device', type=str, default='cuda')
+parser.add_argument('--device', type=str, default=None)
 parser.add_argument('--force', action='store_true')
 
 args = parser.parse_args()
+
+if args.device is None:
+    import torch
+    if torch.cuda.is_available():
+        args.device = 'cuda'
+    else:
+        args.device = 'cpu'
 
 import os
 import loss

@@ -24,12 +24,21 @@ parser.add_argument('--systlist', type=str, nargs='*',
                              'CH', 'JES', 'JER', 'UNCLUSTERED',
                              'TRK_EFF'])
 
-parser.add_argument('--device', type=str, default='cuda')
+parser.add_argument('--device', type=str, default=None)
 parser.add_argument('--projectAxes', type=str, nargs='*', default=None)
 
 parser.add_argument('--smoothed', action='store_true',)
 
+parser.add_argument('--force', action='store_true')
+
 args = parser.parse_args()
+
+if args.device is None:
+    import torch
+    if torch.cuda.is_available():
+        args.device = 'cuda'
+    else:
+        args.device = 'cpu'
 
 import filenames
 import os
@@ -50,8 +59,14 @@ base_folder = os.path.join(reco_folder, loss_name)
 runs = os.listdir(base_folder)
 runs = filter(lambda x: x.startswith('RUN'), runs)
 
+def get_command(run):
+    command = ['python', 'scripts/compute_hessian.py', 
+                os.path.join(base_folder, run),
+                '--device', args.device]
+    if args.force:
+        command.append('--force')
+    return command
+
 import subprocess
 for run in runs:
-    subprocess.run(['python', 'scripts/compute_hessian.py', 
-                    os.path.join(base_folder, run),
-                    '--device', args.device])
+    subprocess.run(get_command(run))
