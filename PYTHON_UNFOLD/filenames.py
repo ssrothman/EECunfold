@@ -380,6 +380,7 @@ def reco_name(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, project
             projectstr = '_PROJECT'
             for ax in projectAxes:
                 projectstr += f'-{ax}'
+            projectstr += '_'
             options = list(filter(lambda x: projectstr in x, options))
         else:
             options = list(filter(lambda x: '_PROJECT' not in x, options))
@@ -396,6 +397,7 @@ def reco_name(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, project
                 else:
                     nboot_options.append(0)
                 print("\t%d: nboot=%d"%(i, nboot_options[-1]))
+                print("\t\t",opt)
             print("Using the largest option. If this is not what you want, please specify nboot explicitly.")
             nboot = max(nboot_options)
         else:
