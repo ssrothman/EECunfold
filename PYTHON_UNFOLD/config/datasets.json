@@ -136,7 +136,7 @@
             "tag" : "TT",
             "label" : "TT",
             "color" : "sandybrown",
-            "xsec" : 89.51
+            "xsec" : 87.31
         }, 
         "ST_t" : {
             "tag" : "ST_t",
@@ -177,6 +177,13 @@
             "stacks" : ["HT"],
             "global_label" : "All MC samples",
             "global_color" : "orange"
+        },
+        "allMCHerwig" : {
+            "tag": "allMCHerwig",
+            "dsets" : ["ZZ", "WZ", "WW", "TT", "ST_t", "ST_t_anti", "ST_tW", "ST_tW_anti", "Herwig_inclusive"],
+            "stacks" : [],
+            "global_label" : "All MC samples [Herwig]",
+            "global_color" : "red"
         }
     },
     "StacksDATA" : {
