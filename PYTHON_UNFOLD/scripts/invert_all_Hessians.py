@@ -24,10 +24,15 @@ parser.add_argument('--systlist', type=str, nargs='*',
                              'CH', 'JES', 'JER', 'UNCLUSTERED',
                              'TRK_EFF'])
 
-parser.add_argument('--help_condition', type=float, default=0.001)
 parser.add_argument('--projectAxes', type=str, nargs='*', default=None)
 
+parser.add_argument('--clipLowestN', type=int, default=0)
+parser.add_argument('--forcePositive', action='store_true')
+
+parser.add_argument('--clip_wrt_corr', action='store_true')
+
 parser.add_argument('--smoothed', action='store_true',)
+parser.add_argument('--force', action='store_true')
 
 args = parser.parse_args()
 
@@ -50,8 +55,19 @@ base_folder = os.path.join(reco_folder, loss_name)
 runs = os.listdir(base_folder)
 runs = filter(lambda x: x.startswith('RUN'), runs)
 
+def get_command(run):
+    command = ['python', 'scripts/invert_Hessian.py', 
+               os.path.join(base_folder, run),
+               '--clipLowestN', str(args.clipLowestN)]
+    if args.forcePositive:
+        command.append('--forcePositive')
+    if args.clip_wrt_corr:
+        command.append('--clip_wrt_corr')
+    if args.force:
+        command.append('--force')
+    return command
+
+
 import subprocess
 for run in runs:
-    subprocess.run(['python', 'scripts/invert_Hessian.py', 
-                    os.path.join(base_folder, run),
-                    '--help_condition', str(args.help_condition)])
+    subprocess.run(get_command(run))

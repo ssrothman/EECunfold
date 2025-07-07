@@ -12,6 +12,11 @@ mutually_exclusive.add_argument('--conditionRange', nargs=2, type=int, default=N
 
 parser.add_argument('--force', action='store_true')
 
+parser.add_argument('--clipLowestN', type=int, default=0)
+parser.add_argument('--forcePositive', action='store_true')
+
+parser.add_argument('--clip_wrt_corr', action='store_true')
+
 args = parser.parse_args()
 
 if args.Rundir[-1] == '/':
@@ -26,7 +31,14 @@ elif args.conditionOne is not None:
     outname += '_cond%d' % args.conditionOne
 elif args.conditionRange is not None:
     outname += '_cond%d-%d' % (args.conditionRange[0], args.conditionRange[1])
-outname += '.pkl'
+
+clipname = 'clip%d' % args.clipLowestN
+if args.forcePositive:
+    clipname += '_forcePos'
+if args.clip_wrt_corr:
+    clipname += '_clipCorr'
+
+outname += '_' + clipname + '.pkl'
 resultpath = os.path.join(args.Rundir, 'minimization_result', outname)
 
 if os.path.exists(resultpath) and not args.force:
@@ -59,10 +71,10 @@ x = res[0].x
 reco = res[1]
 
 Hinv = ioutil.wrapped_read_np(
-    os.path.join(args.Rundir, 'minimization_result', 'INVHESS.npy'),
+    os.path.join(args.Rundir, 'minimization_result', 'HESS_EIGINV_%s.npy' % clipname)
 )
 L = ioutil.wrapped_read_np(
-    os.path.join(args.Rundir, 'minimization_result', 'INVHESS_L.npy'),
+    os.path.join(args.Rundir, 'minimization_result', 'HESS_EIGINV_L_%s.npy' % clipname)
 )
 
 import statutil

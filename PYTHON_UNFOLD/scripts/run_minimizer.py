@@ -28,6 +28,9 @@ parser.add_argument('--run2d', action='store_true')
 
 recoerr_group = parser.add_mutually_exclusive_group(required=True)
 recoerr_group.add_argument('--invcov', action='store_true')
+recoerr_group.add_argument('--invcov_normed', action='store_true')
+recoerr_group.add_argument('--invcov_eig', type=str, default=None)
+
 recoerr_group.add_argument('--stdev_type1', action='store_true')
 recoerr_group.add_argument('--stdev_type2', action='store_true')
 
@@ -37,7 +40,7 @@ x0group.add_argument('--nullx0', action='store_true')
 x0group.add_argument('--goodGuessX0', action='store_true')
 x0group.add_argument('--MCx0', action='store_true')
 
-parser.add_argument('--device', type=str, default='cuda')
+parser.add_argument('--device', type=str, default=None)
 parser.add_argument('--method', type=str, default='l-bfgs')
 parser.add_argument('--method_kwargs', type=str, nargs='*', default=[])
 
@@ -50,6 +53,13 @@ freezegroup = parser.add_mutually_exclusive_group(required=False)
 freezegroup.add_argument('--freezeAllNuisances', action='store_true')
 
 args = parser.parse_args()
+
+if args.device is None:
+    import torch
+    if torch.cuda.is_available():
+        args.device = 'cuda'
+    else:
+        args.device = 'cpu'
 
 #parse method_kwargs
 method_kwargs = {}
@@ -70,9 +80,9 @@ for kw in args.method_kwargs:
                 pass
     method_kwargs[key] = value
 
-if args.run2d and not args.invcov:
+if args.run2d and not (args.invcov or args.invcov_normed or args.invcov_eig is not None):
     raise ValueError("run2d mode requires invcov")
-if not args.run2d and args.invcov:
+if not args.run2d and (args.invcov or args.invcov_normed or args.invcov_eig is not None):
     raise ValueError("invcov is only for run2d mode")
 
 import os
@@ -103,6 +113,12 @@ reco = ioutil.wrapped_read_np(os.path.join(reco_folder, 'RECO.npy'))
 if args.invcov:
     recoerrpath = os.path.join(reco_folder, 'INVCOV.npy')
     recoerr_mode_str = 'invcov'
+elif args.invcov_normed:
+    recoerrpath = os.path.join(reco_folder, 'INVCOV_NORMED.npy')
+    recoerr_mode_str = 'invcov_normed'
+elif args.invcov_eig is not None:
+    recoerrpath = os.path.join(reco_folder, 'COV_EIGINV_%s.npy'%args.invcov_eig)
+    recoerr_mode_str = 'invcov_eig_%s' % args.invcov_eig
 elif args.stdev_type1:
     recoerrpath = os.path.join(reco_folder, 'ERR1D.npy')
     recoerr_mode_str = 'stdev_type1'
@@ -110,7 +126,7 @@ elif args.stdev_type2:
     recoerrpath = os.path.join(reco_folder, 'ERR2D.npy')
     recoerr_mode_str = 'stdev_type2'
 else:
-    raise ValueError("Couldn't determine recoerr type. Use --invcov, --stdev_type1, or --stdev_type2.")
+    raise ValueError("Couldn't determine recoerr type. Use --invcov, --invcov_normed, --invcov_eig, --stdev_type1, or --stdev_type2.")
 recoerr = ioutil.wrapped_read_np(recoerrpath)
 
 if args.x0fromfile is not None:

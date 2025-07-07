@@ -28,12 +28,25 @@ parser.add_argument('--projectAxes', type=str, nargs='*', default=None,)
 
 parser.add_argument('--smoothed', action='store_true',)
 
-parser.add_argument('--device', type=str, default='cuda')
+parser.add_argument('--device', type=str, default=None)
 parser.add_argument('--out_nboot', type=int, default=5000)
 parser.add_argument('--freezeAllNuisances', action='store_true')
 parser.add_argument('--force', action='store_true')
 
+parser.add_argument('--clipLowestN', type=int, default=0)
+parser.add_argument('--forcePositive', action='store_true')
+
+parser.add_argument('--clip_wrt_corr', action='store_true')
+
+
 args = parser.parse_args()
+
+if args.device is None:
+    import torch
+    if torch.cuda.is_available():
+        args.device = 'cuda'
+    else:
+        args.device = 'cpu'
 
 import filenames
 import os
@@ -60,6 +73,12 @@ if args.freezeAllNuisances:
     options.append('--freezeAllNuisances')
 if args.force:
     options.append('--force')
+options.append('--clipLowestN')
+options.append(str(args.clipLowestN))
+if args.forcePositive:
+    options.append('--forcePositive')
+if args.clip_wrt_corr:
+    options.append('--clip_wrt_corr')
 
 import subprocess
 for run in runs:

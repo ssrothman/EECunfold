@@ -36,6 +36,11 @@ parser.add_argument('--smoothed', action='store_true',)
 parser.add_argument('--out_nboot', type=int, default=5000)
 parser.add_argument('--force', action='store_true')
 
+parser.add_argument('--clipLowestN', type=int, default=0)
+parser.add_argument('--forcePositive', action='store_true')
+
+parser.add_argument('--clip_wrt_corr', action='store_true')
+
 args = parser.parse_args()
 
 import filenames
@@ -70,6 +75,13 @@ if args.conditionRange is not None:
 
 if args.force:
     options.append('--force')
+
+options.append('--clipLowestN')
+options.append(str(args.clipLowestN))
+if args.forcePositive:
+    options.append('--forcePositive')
+if args.clip_wrt_corr:
+    options.append('--clip_wrt_corr')
 
 import subprocess
 for run in runs:

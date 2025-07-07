@@ -15,7 +15,10 @@ parser.add_argument('--force', action='store_true')
 
 parser.add_argument('--projectAxes', type=str, nargs='*', default=None)
 
-parser.add_argument('--clip_to_zero', type=float, default=1e-20)
+parser.add_argument('--clipLowestN', type=int, default=0)
+parser.add_argument('--forcePositive', action='store_true')
+
+parser.add_argument('--clip_wrt_corr', action='store_true')
 
 args = parser.parse_args()
 
@@ -28,46 +31,61 @@ recofolder = filenames.reco_folder(
         args.objsyst, args.wtsyst, args.projectAxes
 )
 
-eigvals_path = os.path.join(recofolder, 'COV_EIGVALS.npy')
-eigvecs_path = os.path.join(recofolder, 'COV_EIGVECS.npy')
+if args.clip_wrt_corr:
+    eigvals_path = os.path.join(recofolder, 'CORR_EIGVALS.npy')
+    eigvecs_path = os.path.join(recofolder, 'CORR_EIGVECS.npy')
+else:
+    eigvals_path = os.path.join(recofolder, 'COV_EIGVALS.npy')
+    eigvecs_path = os.path.join(recofolder, 'COV_EIGVECS.npy')
 
-if os.path.exists(eigvals_path) and os.path.exists(eigvecs_path) and not args.force:
+clipped_name = 'clip%d' % args.clipLowestN
+if args.forcePositive:
+    clipped_name += '_forcePos'
+if args.clip_wrt_corr:
+    clipped_name += '_clipCorr'
+
+inverse_path = os.path.join(recofolder, 'COV_EIGINV_%s.npy' % clipped_name)
+reconstructed_path = os.path.join(recofolder, 'COV_EIG_%s.npy' % clipped_name)
+
+if os.path.exists(eigvals_path) and os.path.exists(eigvecs_path) and os.path.exists(inverse_path) and os.path.exists(reconstructed_path) and not args.force:
     print(f"Eigenvalues and eigenvectors already exist in {recofolder}. Use --force to overwrite.")
     import sys
     sys.exit(0)
 
 import ioutil
+import numpy as np
 
 cov = ioutil.wrapped_read_np(os.path.join(recofolder, 'COV.npy'))
 
-print("Computing eigendecomposition...")
-solver = eigen.SelfAdjointEigenSolver(cov)
+if args.clip_wrt_corr:
+    err = np.sqrt(np.diag(cov))
+    inverr = 1/err
+    corr = np.diag(inverr) @ cov @ np.diag(inverr)
+
+    print("Computing eigendecomposition for corr...")
+    solver = eigen.SelfAdjointEigenSolver(corr)
+else:
+    print("Computing eigendecomposition for covariance...")
+    solver = eigen.SelfAdjointEigenSolver(cov)
+
 if solver.info() != eigen.ComputationInfo.Success:
-    raise RuntimeError(f"Eigen decomposition failed with info: {solver.info()}")
-
-eigvals = solver.eigenvalues()
-eigvecs = solver.eigenvectors()
-
-#check
-import numpy as np
-reconstructed = eigvecs @ np.diag(eigvals) @ eigvecs.T
-if not np.allclose(reconstructed, cov):
-    print("Reconstructed covariance does not match original covariance.")
+    print("Eigen decomposition failed")
+    print(solver.info())
     import sys
     sys.exit(1)
 
-ioutil.wrapped_write_np(eigvals_path, eigvals)
-ioutil.wrapped_write_np(eigvecs_path, eigvecs)
+ioutil.wrapped_write_np(eigvals_path, solver.eigenvalues())
+ioutil.wrapped_write_np(eigvecs_path, solver.eigenvectors())
 
-#alternative inverse
-eigvals_denom = np.where(eigvals < args.clip_to_zero, 1, eigvals)
-eigvals_inv = 1 / eigvals_denom
+print("Inverting...")
+import statutil
+inverse, reconstructed = statutil.inverse_from_eigenspectrum(
+    solver, clip_lowest_N=args.clipLowestN, force_positive=args.forcePositive
+)
 
-eigvals_inv2 = np.where(eigvals < args.clip_to_zero, 0, eigvals_inv)
+if args.clip_wrt_corr:
+    inverse = np.diag(inverr) @ inverse @ np.diag(inverr)
+    reconstructed = np.diag(err) @ reconstructed @ np.diag(err)
 
-invcov_eig = eigvecs @ np.diag(eigvals_inv) @ eigvecs.T
-invcov_eig2 = eigvecs @ np.diag(eigvals_inv2) @ eigvecs.T
-
-ioutil.wrapped_write_np(os.path.join(recofolder, 'COV_EIGINV.npy'), invcov_eig)
-ioutil.wrapped_write_np(os.path.join(recofolder, 'COV_EIGINV2.npy'), invcov_eig2)
-
+ioutil.wrapped_write_np(inverse_path, inverse)
+ioutil.wrapped_write_np(reconstructed_path, reconstructed)

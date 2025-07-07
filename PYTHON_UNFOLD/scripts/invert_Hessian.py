@@ -5,7 +5,11 @@ parser = argparse.ArgumentParser(description='Run the minimizer for EEC reconstr
 parser.add_argument('Rundir', type=str)
 
 parser.add_argument('--force', action='store_true')
-parser.add_argument('--help_condition', type=float, default=0.001)
+
+parser.add_argument('--clipLowestN', type=int, default=0)
+parser.add_argument('--forcePositive', action='store_true')
+
+parser.add_argument('--clip_wrt_corr', action='store_true')
 
 args = parser.parse_args()
 
@@ -13,16 +17,27 @@ import os
 
 hessianpath = os.path.join(args.Rundir, 'minimization_result', 'HESSIAN.npy')
 
-if not os.path.exists(hessianpath):
-    print(f"File {hessianpath} does not exist. Cannot compute inverse Hessian.")
-    import sys
-    sys.exit(1)
+if args.clip_wrt_corr:
+    eigvals_path = os.path.join(args.Rundir, 'minimization_result', 'HESS_CORR_EIGVALS.npy')
+    eigvecs_path = os.path.join(args.Rundir, 'minimization_result', 'HESS_CORR_EIGVECS.npy')
+else:
+    eigvals_path = os.path.join(args.Rundir, 'minimization_result', 'HESS_EIGVALS.npy')
+    eigvecs_path = os.path.join(args.Rundir, 'minimization_result', 'HESS_EIGVECS.npy')
 
-invhess_path = os.path.join(args.Rundir, 'minimization_result', 'INVHESS.npy')
-invhessL_path = os.path.join(args.Rundir, 'minimization_result', 'INVHESS_L.npy')
+clipped_name = 'clip%d' % args.clipLowestN
+if args.forcePositive:
+    clipped_name += '_forcePos'
+if args.clip_wrt_corr:
+    clipped_name += '_clipCorr'
 
-if os.path.exists(invhess_path) and not args.force:
-    print(f"File {invhess_path} already exists. Use --force to overwrite.")
+inverse_path = os.path.join(args.Rundir, 'minimization_result', 'HESS_EIGINV_%s.npy' % clipped_name)
+reconstructed_path = os.path.join(args.Rundir, 'minimization_result', 'HESS_EIG_%s.npy' % clipped_name)
+
+Linv_path = os.path.join(args.Rundir, 'minimization_result', 'HESS_EIGINV_L_%s.npy' % clipped_name)
+Lreco_path = os.path.join(args.Rundir, 'minimization_result', 'HESS_EIG_L_%s.npy' % clipped_name)
+
+if os.path.exists(eigvals_path) and os.path.exists(eigvecs_path) and os.path.exists(inverse_path) and os.path.exists(reconstructed_path) and not args.force:
+    print(f"Destination {inverse_path} already exists. Use --force to overwrite.")
     import sys
     sys.exit(0)
 
@@ -32,33 +47,42 @@ import numpy as np
 H = ioutil.wrapped_read_np(hessianpath)
 H = 0.5 * (H + H.T)  # Ensure symmetry
 
-if args.help_condition > 0:
-    print("Applying help condition to Hessian...")
-    np.fill_diagonal(H, np.diagonal(H) * (1 + args.help_condition))
+if args.clip_wrt_corr:
+    err = np.sqrt(np.diag(H))
+    inverr = 1 / err
+    corr = np.diag(inverr) @ H @ np.diag(inverr)
 
-print("Computing LDLT(H)")
-ldlt = eigen.LDLT(H)
-if ldlt.info() != eigen.ComputationInfo.Success:
-    print("LDLT decomposition failed")
-    print(ldlt.info())
+    print("Computing eigendecomposition of normalized Hessian...")
+    solver = eigen.SelfAdjointEigenSolver(corr)
+else:
+    print("Computing eigendecomposition of Hessian...")
+    solver = eigen.SelfAdjointEigenSolver(H)
+
+if solver.info() != eigen.ComputationInfo.Success:
+    print("Eigen decomposition failed")
+    print(solver.info())
     import sys
     sys.exit(1)
 
-invhess = ldlt.solve(np.eye(H.shape[0]))
-ioutil.wrapped_write_np(invhess_path, invhess)
+ioutil.wrapped_write_np(eigvals_path, solver.eigenvalues())
+ioutil.wrapped_write_np(eigvecs_path, solver.eigenvectors())
 
-print("Computing LDLT(Hinv)")
-ldlt_inv = eigen.LDLT(invhess)
+print("Inverting...")
+import statutil
+inverse, reconstructed, Linv, Lreco = statutil.inverse_from_eigenspectrum(
+    solver, clip_lowest_N=args.clipLowestN, force_positive=args.forcePositive,
+    return_sqrt=True
+)
 
-PL = ldlt_inv.matrixPL()
-D = ldlt_inv.vectorD()
-D[D<0] = 0
-Dsq = np.sqrt(D)
-L = PL @ np.diag(Dsq)
+if args.clip_wrt_corr:
+    inverse = np.diag(inverr) @ inverse @ np.diag(inverr)
+    reconstructed = np.diag(err) @ reconstructed @ np.diag(err)
 
-#check
-reconstructed = L @ L.T
-if not np.allclose(reconstructed, invhess):
-    print("WARNING: Reconstructed matrix does not match the inverse Hessian.")
+    Linv = np.diag(inverr) @ Linv
+    Lreco = np.diag(err) @ Lreco
 
-ioutil.wrapped_write_np(invhessL_path, L)
+ioutil.wrapped_write_np(inverse_path, inverse)
+ioutil.wrapped_write_np(reconstructed_path, reconstructed)
+
+ioutil.wrapped_write_np(Linv_path, Linv)
+ioutil.wrapped_write_np(Lreco_path, Lreco)

@@ -17,6 +17,8 @@ parser.add_argument('--r123type', type=str, default=None)
 
 parser.add_argument('--force', action='store_true')
 
+parser.add_argument('--alsoNormalized', action='store_true',)
+
 parser.add_argument('--projectAxes', type=str, nargs='*', default=None)
 
 args = parser.parse_args()
@@ -64,8 +66,8 @@ import unc
 print("building cov")
 vals = Hreco.values(flow=True).reshape((Hreco.axes['bootstrap'].size, -1))
 
-sums = vals.sum(axis=1)
-vals = vals * sums[0] / sums[:,None]
+#sums = vals.sum(axis=1)
+#vals = vals * sums[0] / sums[:,None]
 
 boots = vals[1:]
 nom = vals[0][None,:]
@@ -88,3 +90,21 @@ ioutil.wrapped_write_np(os.path.join(recofolder, 'INVCOV.npy'), invcov)
 err2D = 1/np.sqrt(np.diag(invcov))
 err2D[np.diag(invcov) <= 0] = 1
 ioutil.wrapped_write_np(os.path.join(recofolder, 'ERR2D.npy'), err2D)
+
+if args.alsoNormalized:
+    sums = vals.sum(axis=1)
+    vals = vals * sums[0] / sums[:,None]
+
+    boots = vals[1:]
+    nom = vals[0][None,:]
+
+    DY = boots - nom
+
+    cov = DY.T @ DY / DY.shape[0]
+
+    ioutil.wrapped_write_np(os.path.join(recofolder, 'COV_NORMED.npy'), cov)
+
+    print("inverting cov")
+    codcov = eigen.CompleteOrthogonalDecomposition(cov)
+    invcov = codcov.pseudoInverse()
+    ioutil.wrapped_write_np(os.path.join(recofolder, 'INVCOV_NORMED.npy'), invcov)

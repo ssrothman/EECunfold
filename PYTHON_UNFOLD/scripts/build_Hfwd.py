@@ -5,14 +5,26 @@ parser.add_argument('Rundir', type=str)
 
 parser.add_argument("--out_nboot", type=int, default=5000)
 
-parser.add_argument('--device', type=str, default='cuda')
+parser.add_argument('--device', type=str, default=None)
 
 freeze_group = parser.add_mutually_exclusive_group(required=False)
 freeze_group.add_argument('--freezeAllNuisances', action='store_true')
 
 parser.add_argument('--force', action='store_true')
 
+parser.add_argument('--clipLowestN', type=int, default=0)
+parser.add_argument('--forcePositive', action='store_true')
+
+parser.add_argument('--clip_wrt_corr', action='store_true')
+
 args = parser.parse_args()
+
+if args.device is None:
+    import torch
+    if torch.cuda.is_available():
+        args.device = 'cuda'
+    else:
+        args.device = 'cpu'
 
 if args.Rundir[-1] == '/':
     args.Rundir = args.Rundir[:-1]
@@ -27,7 +39,13 @@ if args.freezeAllNuisances:
 else:
     freezeMode = 'no'
 
-outname += '.pkl'
+clipname = 'clip%d' % args.clipLowestN
+if args.forcePositive:
+    clipname += '_forcePos'
+if args.clip_wrt_corr:
+    clipname += '_clipCorr'
+
+outname += '_' + clipname + '.pkl'
 resultpath = os.path.join(args.Rundir, 'minimization_result', outname)
 
 if os.path.exists(resultpath) and not args.force:
@@ -58,11 +76,8 @@ res = minimizer.read_minimization_result(
 x = res[0].x
 reco = res[1]
 
-Hinv = ioutil.wrapped_read_np(
-    os.path.join(args.Rundir, 'minimization_result', 'INVHESS.npy'),
-)
 L = ioutil.wrapped_read_np(
-    os.path.join(args.Rundir, 'minimization_result', 'INVHESS_L.npy'),
+    os.path.join(args.Rundir, 'minimization_result', 'HESS_EIGINV_L_%s.npy' % clipname)
 )
 
 _, LOSS, configdict, _ = minimizer.setup_minimizer_from_run(args.Rundir)
