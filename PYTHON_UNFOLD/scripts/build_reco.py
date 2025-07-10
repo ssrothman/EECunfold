@@ -25,6 +25,8 @@ parser.add_argument('--oldbinning', action='store_true',)
 
 parser.add_argument('--rebinning', type=str, default=None)
 
+parser.add_argument('--what', type=str, default='reco')
+
 args = parser.parse_args()
 
 import fasteigenpy as eigen
@@ -35,10 +37,12 @@ import os
 import ioutil
 import hist
 
+capswhat = args.what.upper()
+
 Hreco = filenames.get_full_hist(
     args.Tag, args.Sample, args.boot_per_file,
     args.statN, args.statK, args.firstN,
-    args.objsyst, args.wtsyst, 'reco',
+    args.objsyst, args.wtsyst, args.what,
     args.reweight, args.r123type,
     max_nboot=args.nboot,
     from_bkp=args.oldbinning,
@@ -61,6 +65,9 @@ recofolder = filenames.reco_folder(
 if args.oldbinning:
     recofolder += '_oldbinning'
 
+if args.what != 'reco':
+    recofolder = recofolder.replace('RECO', capswhat)
+
 if os.path.exists(recofolder) and not args.force:
     print(f"Folder {recofolder} already exists. Use --force to overwrite.")
     import sys
@@ -81,7 +88,8 @@ if args.rebinning is not None:
     recovalues = recovalues.T
     print("\trebinned shape: ", recovalues.shape)
 
-ioutil.wrapped_write_np(os.path.join(recofolder, 'RECO.npy'), recovalues[0])
+ioutil.wrapped_write_np(os.path.join(recofolder, '%s.npy'%capswhat), recovalues[0])
+ioutil.wrapped_write_np(os.path.join(recofolder, '%s_wBOOT.npy'%capswhat), recovalues)
 RecoBinning.dump_to_file(os.path.join(recofolder, 'Binning.json'))
 
 import unc
