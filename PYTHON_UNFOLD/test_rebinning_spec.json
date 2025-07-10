@@ -1,0 +1,26 @@
+{
+    "comments" : [
+        "The parser only reads the 'spec' section, so we can add anything we want here.",
+        "The format is as follows:",
+        "The 'spec' section must contain a list of at least one 'specblock'.",
+        "Each 'specblock' is a dictionary of axisname : [list of edge indices]",
+        "all of the axes in the histogram MUST be present in the specblock,",
+        "and all of the indices must be integers in the range [0, ax.extent].",
+        "Note that these are bin EDGE indices, bin bin indices",
+        "Eg for an axis with 10 bins, to reduce to one bin you want [0, 10]."
+    ],
+    "spec" : [
+        {
+            "pt" : [0, 3],
+            "R" : [0, 3, 5],
+            "r" : [0, 5, 10],
+            "c" : [0, 2, 4, 6, 8, 10]
+        },
+        {
+            "pt" : [3, 4, 5, 7],
+            "R" : [0, 5],
+            "c" : [0, 5, 10],
+            "r" : [0,5,  10]
+        }
+    ]
+}
