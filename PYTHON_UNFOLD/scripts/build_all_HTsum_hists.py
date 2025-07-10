@@ -43,6 +43,8 @@ parser.add_argument('--reweight', type=str, default=None)
 
 parser.add_argument('--outputtag', type=str, default='Pythia_HTsum')
 
+parser.add_argument('--oldbinning', action='store_true')
+
 parser.add_argument('-j', '--jobs', type=int, default=1)
 
 args= parser.parse_args()
@@ -65,6 +67,8 @@ def make_command(objsyst, wtsyst, what):
     ]
     if args.reweight is not None:
         command += ['--reweight', args.reweight]
+    if args.oldbinning:
+        command.append('--oldbinning')
     return command
 
 # setup parallel execution
