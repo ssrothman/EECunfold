@@ -55,12 +55,6 @@ def get_arrs(histdict, syst, iboot, basebinning, rebinning_path):
     if transfer is not None:
         transfer = transfer.reshape((recoshape, genshape))
 
-        tdenom = gen - genBkg
-        tdenom = np.where(tdenom==0, 1, tdenom)
-        if iboot is None:
-            tdenom = tdenom[0]
-        transfer = transfer/tdenom[None, :]
-
     if rebinning_path is not None:
         import indexing
         print("Rebinning...")
@@ -84,6 +78,13 @@ def get_arrs(histdict, syst, iboot, basebinning, rebinning_path):
         print("\tgenBkg: ", genBkg.shape)
         if transfer is not None:
             print("\ttransfer: ", transfer.shape)
+
+    if transfer is not None:
+        tdenom = gen - genBkg
+        tdenom = np.where(tdenom==0, 1, tdenom)
+        if iboot is None:
+            tdenom = tdenom[0]
+        transfer = transfer/tdenom[None, :]
 
     Gdenom = np.where(gen==0, 1, gen)
     gamma = genBkg / Gdenom
@@ -535,7 +536,8 @@ def dump_Hfwd(LOSS, x, invhess_L, reco, Nboot, destination,
 
     fwd = LOSS.forward(beta, theta).cpu().detach().numpy()
 
-    result = fwd[None,:]
+    result = np.zeros((Nboot+1, fwd.shape[0]), dtype=fwd.dtype)
+    result[0] += fwd
 
     import statutil
     print("Generating toys from multivariate gaussian...")
@@ -547,7 +549,7 @@ def dump_Hfwd(LOSS, x, invhess_L, reco, Nboot, destination,
         beta[beta< 0] = 0
         theta = samples[iboot, LOSS.nBeta:]
         fwd = LOSS.forward(beta, theta).cpu().detach().numpy()
-        result = np.concatenate((result, fwd[None, :]), axis=0)
+        result[iboot+1] += fwd
 
     import ioutil
     ioutil.wrapped_write_np(destination, result)
