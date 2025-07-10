@@ -21,8 +21,7 @@ def wrapped_savefig(path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     plt.savefig(path, dpi=config['DPI'], bbox_inches='tight', format='png')
 
-def get_vals_errs(H, normalize=False):
-    Ys = H.values(flow=True).reshape(H.axes['bootstrap'].size, -1)
+def get_vals_errs(Ys, normalize=False):
     if Ys.shape[0] == 1:
         # If there's only one bootstrap sample, we can't compute an error
         return Ys[0], np.zeros_like(Ys[0])
@@ -46,7 +45,7 @@ def make_chi2_latextable(chi2_l, label_l, path):
         f.write('Sample & $\\chi^2$ \\\\\n')
         f.write('\\hline\n')
         for chi2, label in zip(chi2_l, label_l):
-            f.write(f'{label} & {chi2:.4g} \\\\\n')
+            f.write(f'{label} & {chi2:.7g} \\\\\n')
         f.write('\\end{tabular}\n')
     print(f"Latex table saved to {path}")
 
@@ -84,9 +83,7 @@ def get_chi2(vals1, vals2, normalize=False):
     chi2 = diff @ invcov @ diff
     return chi2
 
-def get_ratio_vals_errs(Hnum, Hdenom, normalize=False, what='value'):
-    Ys_num = Hnum.values(flow=True).reshape(Hnum.axes['bootstrap'].size, -1)
-    Ys_denom = Hdenom.values(flow=True).reshape(Hdenom.axes['bootstrap'].size, -1)
+def get_ratio_vals_errs(Ys_num, Ys_denom, normalize=False, what='value'):
 
     if what == 'value':
         if Ys_num.shape[0] < Ys_denom.shape[0]:
@@ -180,22 +177,50 @@ def plot_transfer_scale(LOSS, isCMS=True, savefig=None):
     finally:
         plt.close(fig)
 
-def plot_bkg_templates(LOSS, isCMS=True, savefig=None):
+def plot_bkg_templates(LOSS, isCMS=True, savefig=None, binning=None, cut=None):
+    if cut is not None and binning is None:
+        raise ValueError("If 'cut' is provided, 'binning' must also be provided.")
+
     fig = plt.figure(figsize=config['Figure_Size'])
     try:
         ax = fig.add_subplot(111)
         if isCMS:
             hep.cms.label(ax=ax, data=False, label=config['Approval_Text'])
-        x = np.arange(len(LOSS.rho0), dtype=np.float64) + 0.5
-        ax.errorbar(x, LOSS.rho0, xerr=0.5, fmt='o', label='Reco')
-        ax.errorbar(x, LOSS.gamma0, xerr=0.5, fmt='o', label='Gen')
+
+        R0 = LOSS.rho0
+        G0 = LOSS.gamma0
+    
+        if cut is not None:
+            R0 = binning.get_slice(R0.T, **cut).T
+            G0 = binning.get_slice(G0.T, **cut).T
+
+            labeltext = ''
+            fnametext = ''
+            for key, value in cut.items():
+                labeltext += '%g < %s < %g\n' % (value[0], key, value[1])
+                fnametext += '_%g-%s-%g' % (value[0], key, value[1])
+            labeltext = labeltext[:-1]
+        else:
+            labeltext = None
+            fnametext = ''
+
+        x = np.arange(len(R0), dtype=np.float64) + 0.5
+
+        ax.errorbar(x, R0, xerr=0.5, fmt='o', label='Reco')
+        ax.errorbar(x, G0, xerr=0.5, fmt='o', label='Gen')
+
+        if labeltext is not None:
+            ax.text(0.05, 0.05, labeltext,
+                    transform=ax.transAxes, fontsize=46,
+                    bbox=dict(facecolor='white', alpha=0.5))
+
         ax.set_xlabel("Bin")
         ax.set_ylabel("Background template")
         ax.legend(loc='best')
         plt.tight_layout()
 
         if savefig is not None:
-            filename = savefig + '_bkg_templates.png'
+            filename = savefig + '%s_bkg_templates.png'%fnametext
             wrapped_savefig(filename)
         else:
             plt.show()
@@ -327,9 +352,9 @@ def plot_eigvals(eigvals_l, label_l=None,
     finally:
         plt.close(fig)
 
-def compare_1d(H_l, label_l, normalize=False, isCMS=True, isData=False, 
+def compare_1d(Ys_l, label_l, normalize=False, isCMS=True, isData=False, 
                logy=True, xoffset=0.1, what='value', pulls=False,
-               savefig=None, cut={}):
+               savefig=None, binning=None, cut=None):
     fig = plt.figure(figsize=config['Figure_Size'])
     try:
         (ax_main, ax_ratio) = fig.subplots(
@@ -341,8 +366,11 @@ def compare_1d(H_l, label_l, normalize=False, isCMS=True, isData=False,
             hep.cms.label(ax=ax_main, data=isData, label=config['Approval_Text'])
 
         main_artists = []
-        for i, (H, label) in enumerate(zip(H_l, label_l)):
-            nom, err1D = get_vals_errs(H[cut], normalize=normalize)
+        for i, (Ys, label) in enumerate(zip(Ys_l, label_l)):
+            if cut is not None:
+                Ys = binning.get_slice(Ys.T, **cut).T
+
+            nom, err1D = get_vals_errs(Ys, normalize=normalize)
             x = np.arange(len(nom), dtype=np.float64) + 0.5
             x += xoffset * i  # Offset each dataset for visibility
 
@@ -363,8 +391,15 @@ def compare_1d(H_l, label_l, normalize=False, isCMS=True, isData=False,
                 )
 
 
-        for i, (H,artist) in enumerate(zip(H_l[1:], main_artists[1:])):
-            ratio, ratioerr = get_ratio_vals_errs(H_l[0][cut], H[cut], normalize=normalize, what=what)
+        Ys0 = Ys_l[0]
+        if cut is not None:
+            Ys0 = binning.get_slice(Ys0.T, **cut).T
+
+        for i, (Ys,artist) in enumerate(zip(Ys_l[1:], main_artists[1:])):
+            if cut is not None:
+                Ys = binning.get_slice(Ys.T, **cut).T
+
+            ratio, ratioerr = get_ratio_vals_errs(Ys0, Ys, normalize=normalize, what=what)
             x = np.arange(len(ratio), dtype=np.float64) + 0.5
             x += xoffset * (i+1)
             if pulls:
