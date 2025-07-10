@@ -283,6 +283,9 @@ class FullLoss:
     def set_2d(self):
         self.covmatrix = True
 
+    def set_rescaled(self, value):
+        self.rescaled = value
+
     def getGoodX0(self, reco):
         print("Building good x0 guess by inverting transfer matrix...")
         print("reco shape:", reco.shape)
@@ -367,7 +370,11 @@ class FullLoss:
         negBTerm = 1000*torch.sum(torch.square(negB))
         beta = torch.where(beta<0, 0, beta)
 
-        fwd = self.forward(beta*reco, theta)
+        if self.rescaled:
+            fwd = self.forward(beta, theta)
+        else:
+            fwd = self.forward(beta*reco, theta)
+
         diff = fwd-reco
 
         if self.covmatrix:

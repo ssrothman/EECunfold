@@ -236,10 +236,29 @@ def parse_loss_name(name):
     else:
         projectAxes=None
 
-    smoothed = '_SMOOTHED' in name
-    return tag, sample, nboot, statN, statK, firstN, syst_l, projectAxes, smoothed
+    m = re.search(r'rebinr(\d+)', name)
+    if m:
+        rebin_r = int(m.group(1))
+    else:
+        rebin_r = 1
 
-def loss_name(tag, sample, nboot, statN, statK, firstN, syst_l, projectAxes, smoothed):
+    m = re.search(r'rebinc(\d+)', name)
+    if m:
+        rebin_c = int(m.group(1))
+    else:
+        rebin_c = 1
+
+    m = re.search(r'PTOVERFLOW-([a-zA-Z0-9]+)', name)
+    if m:
+        ptoverflow = m.group(1)
+    else:
+        ptoverflow = None
+
+    smoothed = '_SMOOTHED' in name
+    return tag, sample, nboot, statN, statK, firstN, syst_l, projectAxes, rebin_r, rebin_c, ptoverflow, smoothed
+
+def loss_name(tag, sample, nboot, statN, statK, firstN, syst_l, 
+              projectAxes, rebin_r, rebin_c, ptoverflow, smoothed):
     if nboot < 0:
         options = os.listdir(os.path.join(datasets.basedir, tag, sample, 'EECres4tee', 'CONSTRUCTED_LOSSES'))
         options = list(filter(lambda x: x.startswith(f'{tag}_{sample}_'), options))
@@ -269,6 +288,22 @@ def loss_name(tag, sample, nboot, statN, statK, firstN, syst_l, projectAxes, smo
             options = list(filter(lambda x: projectstr in x, options))
         else:
             options = list(filter(lambda x: '_PROJECT' not in x, options))
+
+        if rebin_r != 1:
+            options = list(filter(lambda x: f'rebinr{rebin_r}' in x, options))
+        else:
+            options = list(filter(lambda x: 'rebinr' not in x, options))
+
+        if rebin_c != 1:
+            options = list(filter(lambda x: f'rebinc{rebin_c}' in x, options))
+        else:
+            options = list(filter(lambda x: 'rebinc' not in x, options))
+
+        if ptoverflow is not None:
+            thestr = 'PTOVERFLOW-%s' % ptoverflow
+            options = list(filter(lambda x: thestr in x, options))
+        else:
+            options = list(filter(lambda x: 'PTOVERFLOW' not in x, options))
 
         if smoothed:
             options = list(filter(lambda x: '_SMOOTHED' in x, options))
@@ -307,6 +342,12 @@ def loss_name(tag, sample, nboot, statN, statK, firstN, syst_l, projectAxes, smo
         name += '_PROJECT'
         for ax in projectAxes:
             name += f'-{ax}'
+    if rebin_r != 1:
+        name += f'_rebinr{rebin_r}'
+    if rebin_c != 1:
+        name += f'_rebinc{rebin_c}'
+    if ptoverflow is not None:
+        name += f'_PTOVERFLOW-{ptoverflow}'
     if smoothed:
         name += '_SMOOTHED'
     if len(syst_l) > 0:
@@ -315,8 +356,10 @@ def loss_name(tag, sample, nboot, statN, statK, firstN, syst_l, projectAxes, smo
             name += f'-{syst}'
     return name
 
-def loss_folder(tag, sample, nboot, statN, statK, firstN, syst_l, projectAxes, smoothed):
-    name = loss_name(tag, sample, nboot, statN, statK, firstN, syst_l, projectAxes, smoothed)
+def loss_folder(tag, sample, nboot, statN, statK, firstN, syst_l, 
+                projectAxes, rebin_r, rebin_c, ptoverflow, smoothed):
+    name = loss_name(tag, sample, nboot, statN, statK, firstN, syst_l, 
+                     projectAxes, rebin_r, rebin_c, ptoverflow, smoothed)
 
     path = os.path.join(
         datasets.basedir, tag, sample,
@@ -351,17 +394,40 @@ def parse_reco_name(name):
         firstN = int(m.group(1))
     else:
         firstN = -1
-    objsyst = splitted[-2]
-    wtsyst = splitted[-1]
+    if name.endswith('oldbinning'): #THIS IS A HACK :(
+        objsyst = splitted[-3]
+        wtsyst = splitted[-2]
+    else:
+        objsyst = splitted[-2]
+        wtsyst = splitted[-1]
+
+    m = re.search(r'rebinr(\d+)', name)
+    if m:
+        rebin_r = int(m.group(1))
+    else:
+        rebin_r = 1
+    m = re.search(r'rebinc(\d+)', name)
+    if m:
+        rebin_c = int(m.group(1))
+    else:
+        rebin_c = 1
 
     m = re.search(r'_PROJECT(?:-([a-zA-Z0-9]+))*', name)
     if m:
         projectAxes = m.group(0).split('-')[1:]
     else:
         projectAxes = None
-    return tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, projectAxes
 
-def reco_name(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, projectAxes):
+    m = re.search(r'PTOVERFLOW-([a-zA-Z0-9]+)', name)
+    if m:
+        ptoverflow = m.group(1)
+    else:
+        ptoverflow = None
+
+    return tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, projectAxes, rebin_r, rebin_c, ptoverflow
+
+def reco_name(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, 
+              projectAxes, rebin_r, rebin_c, ptoverflow):
     if nboot < 0:
         options = os.listdir(os.path.join(datasets.basedir, tag, sample, 'EECres4tee', 'CONSTRUCTED_RECO')) 
         options = list(filter(lambda x: x.startswith(f'{tag}_{sample}_'), options))
@@ -384,6 +450,22 @@ def reco_name(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, project
             options = list(filter(lambda x: projectstr in x, options))
         else:
             options = list(filter(lambda x: '_PROJECT' not in x, options))
+
+        if rebin_r != 1:
+            options = list(filter(lambda x: f'rebinr{rebin_r}' in x, options))
+        else:
+            options = list(filter(lambda x: 'rebinr' not in x, options))
+
+        if rebin_c != 1:
+            options = list(filter(lambda x: f'rebinc{rebin_c}' in x, options))
+        else:
+            options = list(filter(lambda x: 'rebinc' not in x, options))
+
+        if ptoverflow is not None:
+            thestr = 'PTOVERFLOW-%s' % ptoverflow
+            options = list(filter(lambda x: thestr in x, options))
+        else:
+            options = list(filter(lambda x: 'PTOVERFLOW' not in x, options))
 
         if len(options) == 0:
             raise ValueError(f"No options found for tag {tag}, sample {sample}, firstN {firstN}, projectAxes {projectAxes}.")
@@ -417,11 +499,19 @@ def reco_name(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, project
         name += '_PROJECT'
         for ax in projectAxes:
             name += f'-{ax}'
+    if rebin_r != 1:
+        name += f'_rebinr{rebin_r}'
+    if rebin_c != 1:
+        name += f'_rebinc{rebin_c}'
+    if ptoverflow is not None:
+        name += f'_PTOVERFLOW-{ptoverflow}'
     name += f'_{objsyst}_{wtsyst}'
     return name
 
-def reco_folder(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, projectAxes):
-    name = reco_name(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, projectAxes)
+def reco_folder(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, 
+                projectAxes, rebinr, rebinc, ptoverflow):
+    name = reco_name(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, 
+                     projectAxes, rebinr, rebinc, ptoverflow)
 
     path = os.path.join(
         datasets.basedir, tag, sample,

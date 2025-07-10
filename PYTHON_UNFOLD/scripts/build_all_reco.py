@@ -11,14 +11,16 @@ parser.add_argument('--firstN', type=int, nargs='+', default=[-1])
 parser.add_argument('--wtsyst', type=str, nargs='+', default=['nominal'])
 parser.add_argument('--objsyst', type=str, nargs='+', default=['nominal'])
 
-parser.add_argument('--boot_per_file', type=int, nargs='+', default=[-1])
+parser.add_argument('--boot_per_file', type=int, nargs='+', default=-1)
 parser.add_argument('--reweight', type=str, default=None)
 
 parser.add_argument('--force', action='store_true')
 parser.add_argument('--projectAxes', type=str, nargs='*', default=None)
 
+parser.add_argument('--clipLowestN', type=int, default=0)
+parser.add_argument('--forcePositive', action='store_true')
 
-parser.add_argument('--clip_to_zero', type=float, default=1e-20)
+parser.add_argument('--clip_wrt_corr', action='store_true')
 
 args = parser.parse_args()
 
@@ -34,7 +36,7 @@ def get_command(nboot, statN, statK, firstN, objsyst, wtsyst):
         '--firstN', str(firstN),
         '--wtsyst', wtsyst,
         '--objsyst', objsyst,
-        '--boot_per_file', *[str(b) for b in args.boot_per_file],
+        '--boot_per_file', str(args.boot_per_file)
     ]
     if args.reweight is not None:
         command += ['--reweight', args.reweight]
@@ -54,12 +56,16 @@ def get_command_eig(nboot, statN, steatK, firstN, objsyst, wtsyst):
         '--firstN', str(firstN),
         '--wtsyst', wtsyst,
         '--objsyst', objsyst,
-        '--clip_to_zero', str(args.clip_to_zero),
+        '--clipLowestN', str(args.clipLowestN),
     ] 
     if args.force:
         command.append('--force')
     if args.projectAxes is not None:
         command += ['--projectAxes'] + list(args.projectAxes)
+    if args.clip_wrt_corr:
+        command.append('--clip_wrt_corr')
+    if args.forcePositive:
+        command.append('--forcePositive')
     return command
 
 maxlen = max(len(args.statK), len(args.statN), len(args.firstN))

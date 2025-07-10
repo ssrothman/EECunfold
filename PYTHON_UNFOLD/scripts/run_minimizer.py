@@ -24,12 +24,10 @@ parser.add_argument('--systlist', type=str, nargs='*',
                              'CH', 'JES', 'JER', 'UNCLUSTERED',
                              'TRK_EFF'])
 
-parser.add_argument('--run2d', action='store_true')
-
 recoerr_group = parser.add_mutually_exclusive_group(required=True)
-recoerr_group.add_argument('--invcov', action='store_true')
-recoerr_group.add_argument('--invcov_normed', action='store_true')
-recoerr_group.add_argument('--invcov_eig', type=str, default=None)
+recoerr_group.add_argument('--invcov_normed', type=str, default=None)
+recoerr_group.add_argument('--invcov_direct', type=str, default=None)
+recoerr_group.add_argument('--invcov_boot', type=str, default=None)
 
 recoerr_group.add_argument('--stdev_type1', action='store_true')
 recoerr_group.add_argument('--stdev_type2', action='store_true')
@@ -47,7 +45,15 @@ parser.add_argument('--method_kwargs', type=str, nargs='*', default=[])
 parser.add_argument("--checkpoint_interval", type=int, default=50)
 
 parser.add_argument('--projectAxes', type=str, nargs='*', default=None,)
+parser.add_argument('--rebin_r', type=int, default=1)
+parser.add_argument('--rebin_c', type=int, default=1)
+parser.add_argument('--ptoverflow', type=str, default=None)
+
 parser.add_argument('--smoothed', action='store_true')
+
+parser.add_argument('--rescale', action='store_true',)
+
+parser.add_argument('--oldbinning', action='store_true',)
 
 freezegroup = parser.add_mutually_exclusive_group(required=False)
 freezegroup.add_argument('--freezeAllNuisances', action='store_true')
@@ -80,10 +86,9 @@ for kw in args.method_kwargs:
                 pass
     method_kwargs[key] = value
 
-if args.run2d and not (args.invcov or args.invcov_normed or args.invcov_eig is not None):
-    raise ValueError("run2d mode requires invcov")
-if not args.run2d and (args.invcov or args.invcov_normed or args.invcov_eig is not None):
-    raise ValueError("invcov is only for run2d mode")
+args.run2d = (args.invcov_normed is not None) or \
+        (args.invcov_direct is not None) or \
+        (args.invcov_boot is not None)
 
 import os
 import filenames
@@ -96,13 +101,22 @@ import ioutil
 reco_folder = filenames.reco_folder(
     args.RecoTag, args.RecoSample, args.reco_nboot,
     args.reco_statN, args.reco_statK, args.reco_firstN,
-    args.reco_objsyst, args.reco_wtsyst, args.projectAxes
+    args.reco_objsyst, args.reco_wtsyst, 
+    args.projectAxes, args.rebin_r, args.rebin_c,
+    args.ptoverflow
 )
 loss_folder = filenames.loss_folder(
     args.GenTag, args.GenSample, args.gen_nboot,
     args.gen_statN, args.gen_statK, args.gen_firstN,
-    args.systlist, args.projectAxes, args.smoothed
+    args.systlist, 
+    args.projectAxes, args.rebin_r, args.rebin_c,
+    args.ptoverflow,
+    args.smoothed
 )
+if args.oldbinning:
+    reco_folder += '_oldbinning'
+    loss_folder += '_oldbinning'
+
 loss_name = os.path.basename(loss_folder)
 
 LOSS = loss.FullLoss()
@@ -110,15 +124,24 @@ LOSS.read_from_disk(loss_folder)
 
 reco = ioutil.wrapped_read_np(os.path.join(reco_folder, 'RECO.npy'))
 
-if args.invcov:
-    recoerrpath = os.path.join(reco_folder, 'INVCOV.npy')
-    recoerr_mode_str = 'invcov'
-elif args.invcov_normed:
-    recoerrpath = os.path.join(reco_folder, 'INVCOV_NORMED.npy')
-    recoerr_mode_str = 'invcov_normed'
-elif args.invcov_eig is not None:
-    recoerrpath = os.path.join(reco_folder, 'COV_EIGINV_%s.npy'%args.invcov_eig)
-    recoerr_mode_str = 'invcov_eig_%s' % args.invcov_eig
+if args.invcov_normed is not None:
+    if args.invcov_normed == 'naive':
+        recoerrpath = os.path.join(reco_folder, 'INVCOV_NORMED.npy')
+    else:
+        recoerrpath = os.path.join(reco_folder, 'COV_NORMED_EIGINV_%s.npy' % args.invcov_normed)
+    recoerr_mode_str = 'invcov_normed_%s' % args.invcov_normed
+elif args.invcov_direct is not None:
+    if args.invcov_direct == 'naive':
+        recoerrpath = os.path.join(reco_folder, 'INVCOV_DIRECT.npy')
+    else:
+        recoerrpath = os.path.join(reco_folder, 'COV_DIRECT_EIGINV_%s.npy'%args.invcov_direct)
+    recoerr_mode_str = 'invcov_direct_%s' % args.invcov_direct
+elif args.invcov_boot is not None:
+    if args.invcov_boot == 'naive':
+        recoerrpath = os.path.join(reco_folder, 'INVCOV.npy')
+    else:
+        recoerrpath = os.path.join(reco_folder, 'COV_EIGINV_%s.npy' % args.invcov_boot)
+    recoerr_mode_str = 'invcov_boot_%s' % args.invcov_boot
 elif args.stdev_type1:
     recoerrpath = os.path.join(reco_folder, 'ERR1D.npy')
     recoerr_mode_str = 'stdev_type1'
@@ -126,7 +149,7 @@ elif args.stdev_type2:
     recoerrpath = os.path.join(reco_folder, 'ERR2D.npy')
     recoerr_mode_str = 'stdev_type2'
 else:
-    raise ValueError("Couldn't determine recoerr type. Use --invcov, --invcov_normed, --invcov_eig, --stdev_type1, or --stdev_type2.")
+    raise ValueError("Couldn't determine recoerr type. Use --invcov_boot --invcov_normed, --invcov_direct, --stdev_type1, or --stdev_type2.")
 recoerr = ioutil.wrapped_read_np(recoerrpath)
 
 if args.x0fromfile is not None:
@@ -134,7 +157,7 @@ if args.x0fromfile is not None:
     x0mode_str = "file:"+args.x0fromfile
 elif args.nullx0:
     print("Using null x0")
-    x0 = None
+    x0 = np.ones(LOSS.nBeta)
     x0mode_str = 'nullx0'
 elif args.goodGuessX0:
     goodx0path = os.path.join(reco_folder, loss_name, 'GOODx0.npy')
@@ -171,13 +194,48 @@ configdict = {
     'x0mode' : x0mode_str,
     'freezeMode' : freezemode_str,
     'cpt_interval' : args.checkpoint_interval,
+    'rescale' : args.rescale,
 }
+
 if frozen_mask is not None:
     configdict['frozen_mask'] = frozen_mask.tolist()
 if frozen_vals is not None:
     configdict['frozen_vals'] = frozen_vals.tolist()
 
 ioutil.wrapped_write_json(os.path.join(resultfolder, 'config.json'), configdict)
+
+if args.rescale:
+    if args.run2d:
+        if "INVCOV" in recoerrpath:
+            covpath = recoerrpath.replace("INVCOV", 'COV')
+        elif "EIGINV" in recoerrpath:
+            covpath = recoerrpath.replace("EIGINV", "EIG")
+        else:
+            raise ValueError("Cannot determine covariance path from recoerr path: %s" % recoerrpath)
+        cov = ioutil.wrapped_read_np(covpath)
+        sigma = np.sqrt(np.diagonal(cov))
+    else:
+        sigma = recoerr
+
+    sigma[sigma==0] = 1
+    sigma[~np.isfinite(sigma)] = 1
+
+    reco = reco/sigma
+
+    if args.run2d:
+        recoerr = np.diag(sigma) @ recoerr @ np.diag(sigma)
+    else:
+        recoerr = recoerr / sigma
+        
+    A = np.einsum('i,j->ij', 1/sigma, reco*sigma)
+    LOSS.transfer0 *= A
+    for i in range(LOSS.transferVariations.shape[0]):
+        LOSS.transferVariations[i] *= A
+
+    puregen = (1 - LOSS.gamma0) * x0
+    purereco = LOSS.transfer0 @ puregen
+    pred = (1 + LOSS.rho0) * purereco
+
 
 res = minimizer.run_minimization(LOSS, reco, recoerr, 
                                  run2d = args.run2d,
@@ -188,6 +246,18 @@ res = minimizer.run_minimization(LOSS, reco, recoerr,
                                  frozen_vals = frozen_vals,
                                  cpt_interval=args.checkpoint_interval,
                                  logpath=resultfolder,
+                                 rescaled=args.rescale,
                                  **method_kwargs)
+
+
+if args.rescale:
+    res, reco, recoerr, x0 = res
+    reco = reco * sigma
+    if args.run2d:
+        recoerr = np.diag(1/sigma) @ recoerr @ np.diag(1/sigma)
+    else:
+        recoerr = recoerr * sigma
+
+    res = (res, reco, recoerr, x0)
 
 minimizer.write_minimization_result(*res, destination=os.path.join(resultfolder, 'minimization_result'))

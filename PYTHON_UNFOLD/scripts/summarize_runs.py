@@ -25,6 +25,10 @@ parser.add_argument('--systlist', type=str, nargs='*',
                              'TRK_EFF'])
 
 parser.add_argument('--projectAxes', type=str, nargs='*', default=None,)
+parser.add_argument("--rebin_r", type=int, default=1)
+parser.add_argument("--rebin_c", type=int, default=1)
+parser.add_argument('--ptoverflow', type=str, default=None)
+
 parser.add_argument('--smoothed', action='store_true',)
 
 args = parser.parse_args()
@@ -38,12 +42,17 @@ import numpy as np
 reco_folder = filenames.reco_folder(
     args.RecoTag, args.RecoSample, args.reco_nboot,
     args.reco_statN, args.reco_statK, args.reco_firstN,
-    args.reco_objsyst, args.reco_wtsyst, args.projectAxes
+    args.reco_objsyst, args.reco_wtsyst, 
+    args.projectAxes, args.rebin_r, args.rebin_c,
+    args.ptoverflow,
 )
 loss_folder = filenames.loss_folder(
     args.GenTag, args.GenSample, args.gen_nboot,
     args.gen_statN, args.gen_statK, args.gen_firstN,
-    args.systlist, args.projectAxes, args.smoothed
+    args.systlist,
+    args.projectAxes, args.rebin_r, args.rebin_c,
+    args.ptoverflow,
+    args.smoothed
 )
 loss_name = os.path.basename(loss_folder)
 
@@ -53,7 +62,7 @@ runs = os.listdir(base_folder)
 runs = filter(lambda x: x.startswith('RUN'), runs)
 
 print()
-print("%-23s  %-6s  %-6s  %-5s  %-12s  %-10s  %-10s  %-5s" % ('RUN', 'Loss', '|grad|', 'Run2D', 'RecoErrMode', 'X0Mode', 'FreezeMode', 'Hess?'))
+print("%-23s  %-6s  %-6s  %-5s  %-12s  %-10s  %-10s  %-5s  %-5s" % ('RUN', 'Loss', '|grad|', 'Run2D', 'RecoErrMode', 'X0Mode', 'FreezeMode', 'rescale?', 'Hess?'))
 for run in runs:
     runconfig = ioutil.wrapped_read_json(os.path.join(base_folder, run, 'config.json'), silent=True)
 
@@ -72,6 +81,12 @@ for run in runs:
         has_hess = os.path.exists(os.path.join(base_folder, run, 'minimization_result', 'HESSIAN.npy'))
         has_invhess = os.path.exists(os.path.join(base_folder, run, 'minimization_result', 'INVHESS.npy'))
 
+        if 'rescale' in runconfig:
+            rescale = runconfig['rescale']
+        else:
+            rescale = False
+        rescale = 'yes' if rescale else 'no'
+
         if has_invhess:
             has_hess = 'inv'
         elif has_hess:
@@ -84,8 +99,9 @@ for run in runs:
         fun = "%-6s" % '-'
         gnorm = "%-6s" % '-'
         has_hess = '%-5s' % '-'
+        rescale = 'no'
 
-    print("%-23s  %s  %s  %-5s  %-12s  %-10s  %-10s  %s" % (run, fun, gnorm, runconfig['run2d'], runconfig['recoerr_mode'], runconfig['x0mode'], runconfig['freezeMode'], has_hess))
+    print("%-23s  %s  %s  %-5s  %-12s  %-10s  %-10s  %-5s  %s" % (run, fun, gnorm, runconfig['run2d'], runconfig['recoerr_mode'], runconfig['x0mode'], runconfig['freezeMode'], rescale, has_hess))
     if finished:
         Hunfs = os.listdir(os.path.join(base_folder, run, 'minimization_result'))
         Hunfs = list(filter(lambda x: x.startswith('Hunf'), Hunfs))

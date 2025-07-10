@@ -3,7 +3,7 @@ import argparse
 parser = argparse.ArgumentParser(description='')
 parser.add_argument('Rundir', type=str)
 
-parser.add_argument("--out_nboot", type=int, default=5000)
+parser.add_argument("--out_nboot", type=int, default=15000)
 
 parser.add_argument('--device', type=str, default=None)
 
@@ -57,15 +57,21 @@ import filenames
 import datasets
 import minimizer
 import ioutil
+import hist
 
 reconame = os.path.basename(os.path.dirname(os.path.dirname(args.Rundir)))
-tag, sample, _, statN, statK, firstN, objsyst, wtsyst, projectAxes = filenames.parse_reco_name(reconame)
+tag, sample, _, statN, statK, firstN, objsyst, wtsyst, projectAxes, rebin_r, rebin_c, ptoverflow = filenames.parse_reco_name(reconame)
 
 Htemplate = filenames.get_full_hist(
         tag, sample, -1, statN, statK, firstN, 
         objsyst, wtsyst, 'reco', max_nboot=0,
-        from_bkp=sample != 'Pythia_HTsum',
+        from_bkp='oldbinning' in args.Rundir,
 )
+if rebin_r != 1:
+    Htemplate = Htemplate[{'r' : slice(None,None,hist.rebin(rebin_r))}]
+if rebin_c != 1:
+    Htemplate = Htemplate[{'c' : slice(None,None,hist.rebin(rebin_c))}]
+
 if projectAxes is not None:
     Htemplate = Htemplate.project('bootstrap', *projectAxes)
 
@@ -97,5 +103,5 @@ print("L.shape", L.shape)
 
 import minimizer
 minimizer.dump_Hfwd(LOSS, xfull, L, reco, Htemplate, args.out_nboot, resultpath, 
-                    device=args.device)
+                    ptoverflow=ptoverflow, device=args.device)
 

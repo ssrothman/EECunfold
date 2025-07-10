@@ -49,6 +49,7 @@ H = 0.5 * (H + H.T)  # Ensure symmetry
 
 if args.clip_wrt_corr:
     err = np.sqrt(np.diag(H))
+    err[err==0] = 1
     inverr = 1 / err
     corr = np.diag(inverr) @ H @ np.diag(inverr)
 
