@@ -14,10 +14,7 @@ parser.add_argument('--objsyst', type=str, default='nominal')
 parser.add_argument('--force', action='store_true')
 
 parser.add_argument('--projectAxes', type=str, nargs='*', default=None)
-parser.add_argument('--rebin_r', type=int, default=1)
-parser.add_argument('--rebin_c', type=int, default=1)
-
-parser.add_argument('--ptoverflow', type=str, default=None)
+parser.add_argument('--rebinning', type=str, default=None)
 
 parser.add_argument('--clipLowestN', type=int, default=0)
 parser.add_argument('--forcePositive', action='store_true')
@@ -39,8 +36,7 @@ recofolder = filenames.reco_folder(
         args.Tag, args.Sample, args.nboot,
         args.statN, args.statK, args.firstN,
         args.objsyst, args.wtsyst, 
-        args.projectAxes, args.rebin_r, args.rebin_c,
-        args.ptoverflow,
+        args.projectAxes, args.rebinning,
 )
 if args.oldbinning:
     recofolder += '_oldbinning'

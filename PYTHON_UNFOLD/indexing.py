@@ -1,6 +1,7 @@
 import numpy as np
 import itertools
 import json
+import os
 
 '''
 Not part of the public interface
@@ -252,6 +253,8 @@ class Binning:
     Write to json
     '''
     def dump_to_file(self, file):
+        print("Writing binning spec to file: %s" % file)
+        os.makedirs(os.path.dirname(file), exist_ok=True)
         resultdict = {}
         resultdict['axis_names'] = self.axis_names
         resultdict['Nax'] = self.Nax
@@ -265,6 +268,8 @@ class Binning:
     Read from json
     '''
     def load_from_file(self, file):
+        print("Reading binning spec from file: %s" % file)
+
         with open(file, 'r') as f:
             resultdict = json.load(f)
 
@@ -322,7 +327,7 @@ class Binning:
 
     '''
     Rebin data according to a supplied spec
-    An example spec is given in test_rebinning_spec.json
+    An example spec is given in rebinnings/example.json
 
     Returns (rebinned data, rebinned Binning() instance for interacting with the data)
     '''
@@ -349,11 +354,14 @@ class Binning:
                 if np.min(specblock[name]) < 0:
                     raise ValueError(f"Axis {name} in rebinning specification contains negative indices.")
 
-        result = np.empty((0))
+        extradims = list(data.shape[1:])
+        result = np.empty((0, *extradims))
         for specblock in rebinning_spec['spec']:
             #force the index values into the right order
             #and ensure indices are sorted
-            result = np.append(result, self.get_specblock_binning(data, specblock).ravel())
+            nextvals = self.get_specblock_binning(data, specblock)
+            nextvals = nextvals.reshape((-1, *extradims))
+            result = np.append(result, nextvals, axis=0)
 
         newbinning = Binning()
         newbinning.blocks = self.blocks[0].rebin(rebinning_spec)
@@ -368,6 +376,8 @@ class Binning:
     def get_specblock_binning(self, data, specblock):
         ranges = {name : (np.min(specblock[name]), np.max(specblock[name])) for name in self.axis_names}
         sizes = [np.max(specblock[name]) - np.min(specblock[name]) for name in self.axis_names]
+        extradims = list(data.shape[1:])
+        sizes = sizes + extradims
         theslice = self.blocks[0].get_slice_from_indices(data, **ranges)
         theslice = theslice.reshape(sizes)
 

@@ -18,9 +18,9 @@ from scipy.stats import multivariate_normal
 
 torch.set_default_dtype(torch.float64)
 
-def get_arrs(histdict, syst, iboot, cut, tcut, ptoverflow):
-    the_tcut = tcut.copy()
-    the_cut = cut.copy()
+def get_arrs(histdict, syst, iboot, basebinning, rebinning_path):
+    the_cut = {}
+    the_tcut = {}
     if iboot is not None:
         the_tcut['bootstrap'] = iboot
         the_cut['bootstrap'] = iboot
@@ -36,26 +36,6 @@ def get_arrs(histdict, syst, iboot, cut, tcut, ptoverflow):
     recoBkg = (histdict['unmatchedReco'][syst] + histdict['untransferedReco'][syst])[the_cut].values(flow=True)
 
     if iboot is None:
-        if ptoverflow is not None:
-            reco = reco.reshape((reco.shape[0], reco.shape[1], -1))
-            gen = gen.reshape((gen.shape[0], gen.shape[1], -1))
-            genBkg = genBkg.reshape((genBkg.shape[0], genBkg.shape[1], -1))
-            recoBkg = recoBkg.reshape((recoBkg.shape[0], recoBkg.shape[1], -1))
-            if ptoverflow == 'merge':
-                reduction = list(range(reco.shape[1]))
-                reduction.pop(-1)  # merge the last two bins
-                reco = np.add.reduceat(reco, reduction, axis=1)
-                gen = np.add.reduceat(gen, reduction, axis=1)
-                genBkg = np.add.reduceat(genBkg, reduction, axis=1)
-                recoBkg = np.add.reduceat(recoBkg, reduction, axis=1)
-            elif ptoverflow == 'drop':
-                reco = reco[:,:-1]
-                gen = gen[:,:-1]
-                genBkg = genBkg[:,:-1]
-                recoBkg = recoBkg[:,:-1]
-            else:
-                raise ValueError("ptoverflow must be 'merge' or 'drop', got %s"%ptoverflow)
-
         reco = reco.reshape((reco.shape[0], -1))
         gen = gen.reshape((gen.shape[0], -1))
         genBkg = genBkg.reshape((genBkg.shape[0], -1))
@@ -64,26 +44,6 @@ def get_arrs(histdict, syst, iboot, cut, tcut, ptoverflow):
         recoshape = reco.shape[1]
         genshape = gen.shape[1]
     else:
-        if ptoverflow is not None:
-            reco = reco.reshape((reco.shape[0], -1))
-            gen = gen.reshape((gen.shape[0], -1))
-            genBkg = genBkg.reshape((genBkg.shape[0], -1))
-            recoBkg = recoBkg.reshape((recoBkg.shape[0], -1))
-            if ptoverflow == 'merge':
-                reduction = list(range(reco.shape[0]))
-                reduction.pop(-1) # merge the last two bins
-                reco = np.add.reduceat(reco, reduction, axis=0)
-                gen = np.add.reduceat(gen, reduction, axis=0)
-                genBkg = np.add.reduceat(genBkg, reduction, axis=0)
-                recoBkg = np.add.reduceat(recoBkg, reduction, axis=0)
-            elif ptoverflow == 'drop':
-                reco = reco[:-1]
-                gen = gen[:-1]
-                genBkg = genBkg[:-1]
-                recoBkg = recoBkg[:-1]
-            else:
-                raise ValueError("ptoverflow must be 'merge' or 'drop', got %s"%ptoverflow)
-
         reco = reco.ravel()
         gen = gen.ravel()
         genBkg = genBkg.ravel()
@@ -93,25 +53,6 @@ def get_arrs(histdict, syst, iboot, cut, tcut, ptoverflow):
         genshape = gen.shape[0]
 
     if transfer is not None:
-        if ptoverflow is not None:
-            if ptoverflow == 'merge':
-                irecopt = 0
-                igenpt = len(transfer.shape)//2
-                reduction_reco = list(range(transfer.shape[irecopt]))
-                reduction_reco.pop(-1)  # merge the last two bins
-                transfer = np.add.reduceat(transfer, reduction_reco, axis=irecopt)
-                reduction_gen = list(range(transfer.shape[igenpt]))
-                reduction_gen.pop(-1)  # merge the last two bins
-                transfer = np.add.reduceat(transfer, reduction_gen, axis=igenpt)
-            elif ptoverflow == 'drop':
-                transfer = transfer[:-1]
-                transfer = transfer.reshape((recoshape, 
-                                            transfer.shape[len(transfer.shape)//2], 
-                                            -1))
-                transfer = transfer[:,:-1]
-            else:
-                raise ValueError("ptoverflow must be 'merge' or 'drop', got %s"%ptoverflow)
-
         transfer = transfer.reshape((recoshape, genshape))
 
         tdenom = gen - genBkg
@@ -119,6 +60,30 @@ def get_arrs(histdict, syst, iboot, cut, tcut, ptoverflow):
         if iboot is None:
             tdenom = tdenom[0]
         transfer = transfer/tdenom[None, :]
+
+    if rebinning_path is not None:
+        import indexing
+        print("Rebinning...")
+        reco, _ = basebinning.rebin(reco.T, rebinning_path)
+        recoBkg, _ = basebinning.rebin(recoBkg.T, rebinning_path)
+        gen, _ = basebinning.rebin(gen.T, rebinning_path)
+        genBkg, _ = basebinning.rebin(genBkg.T, rebinning_path)
+        reco = reco.T
+        recoBkg = recoBkg.T
+        gen = gen.T
+        genBkg = genBkg.T
+
+        if transfer is not None:
+            transfer, _ = basebinning.rebin(transfer, rebinning_path)
+            transfer, _ = basebinning.rebin(transfer.T, rebinning_path)
+            transfer = transfer.T
+        print("after rebinning, shapes are")
+        print("\treco: ", reco.shape)
+        print("\trecoBkg: ", recoBkg.shape)
+        print("\tgen: ", gen.shape)
+        print("\tgenBkg: ", genBkg.shape)
+        if transfer is not None:
+            print("\ttransfer: ", transfer.shape)
 
     Gdenom = np.where(gen==0, 1, gen)
     gamma = genBkg / Gdenom
@@ -132,12 +97,11 @@ def setup_loss(histdict,
                Nboot=-1,
                two_sided_systs=[],
                one_sided_systs=[], 
-               cut = {},
-               tcut = {},
-               ptoverflow=None):
+               basebinning=None,
+               rebinning_path=None):
     #nominal
     reco0, gen0, rho0, gamma0, transfer0 = get_arrs(histdict, 'nominal', 0,
-                                                    cut, tcut, ptoverflow)
+                                                    basebinning, rebinning_path)
 
     rhoVariations = []
     gammaVariations = []
@@ -152,7 +116,7 @@ def setup_loss(histdict,
 
     print("Building stat templates...")
     _, _, rhoboot, gammaboot, _ = get_arrs(histdict, 'nominal', None,
-                                           cut, tcut, ptoverflow)
+                                           basebinning, rebinning_path)
     for iboot in tqdm(range(1, Nboot+1)):
         rhoVariations.append((rhoboot[iboot] - rho0)/Nboot)
         gammaVariations.append((gammaboot[iboot] - gamma0)/Nboot)
@@ -161,9 +125,9 @@ def setup_loss(histdict,
     print("Buiding two-sided systs...")
     for syst in tqdm(two_sided_systs):
         _, _, rho_up, gamma_up, transfer_up = get_arrs(histdict, '%sUp'%syst, 0,
-                                                       cut, tcut, ptoverflow)
+                                                       basebinning, rebinning_path)
         _, _, rho_dn, gamma_dn, transfer_dn = get_arrs(histdict, '%sDown'%syst, 0,
-                                                       cut, tcut, ptoverflow)
+                                                       basebinning, rebinning_path)
         rhoVariations.append(0.5*(rho_up - rho_dn))
         gammaVariations.append(0.5*(gamma_up - gamma_dn))
         transferVariations.append(0.5*(transfer_up - transfer_dn))
@@ -173,7 +137,7 @@ def setup_loss(histdict,
     print("Building one-sided systs...")
     for syst in tqdm(one_sided_systs):
         _, _, rho_up, gamma_up, transfer_up = get_arrs(histdict, syst, 0,
-                                                       cut, tcut, ptoverflow)
+                                                       basebinning, rebinning_path)
         rhoVariations.append(rho_up - rho0)
         gammaVariations.append(gamma_up - gamma0)
         transferVariations.append(transfer_up - transfer0)
@@ -274,7 +238,7 @@ def setup_minimizer_from_run(rundir):
 
     import datasets
     import filenames
-    losstag, losssample, _, _, _, _, _, _, _, _, _, _ = filenames.parse_loss_name(lossname)
+    losstag, losssample, _, _, _, _, _, _, _, _, = filenames.parse_loss_name(lossname)
     losspath = os.path.join(datasets.basedir, losstag, losssample, 
                             'EECres4tee', 'CONSTRUCTED_LOSSES', 
                             lossname)
@@ -556,13 +520,10 @@ def build_template_hist(Htemplate, nboot, ptoverflow):
         storage=hist.storage.Double(),         
     )
 
-def dump_Hfwd(LOSS, x, invhess_L, reco, Htemplate, Nboot, destination,
-              ptoverflow, device='cuda'):
+def dump_Hfwd(LOSS, x, invhess_L, reco, Nboot, destination,
+              device='cuda'):
     import hist
     import pickle
-
-    Hres = build_template_hist(Htemplate, Nboot, ptoverflow)
-    shape = list(Hres.values(flow=True).shape[1:])
 
     beta = x[:LOSS.nBeta] * reco
     theta = x[LOSS.nBeta:] 
@@ -572,8 +533,9 @@ def dump_Hfwd(LOSS, x, invhess_L, reco, Htemplate, Nboot, destination,
     reco = torch.from_numpy(reco).to(device)
     LOSS = LOSS.torch().to(device)
 
-    fwd = LOSS.forward(beta, theta)
-    Hres.view(flow=True)[0] += fwd.detach().cpu().numpy().reshape(shape)
+    fwd = LOSS.forward(beta, theta).cpu().detach().numpy()
+
+    result = fwd[None,:]
 
     import statutil
     print("Generating toys from multivariate gaussian...")
@@ -584,32 +546,28 @@ def dump_Hfwd(LOSS, x, invhess_L, reco, Htemplate, Nboot, destination,
         beta = samples[iboot, :LOSS.nBeta] * reco
         beta[beta< 0] = 0
         theta = samples[iboot, LOSS.nBeta:]
-        fwd = LOSS.forward(beta, theta)
-        Hres.view(flow=True)[iboot+1] += fwd.cpu().detach().numpy().reshape(shape)
+        fwd = LOSS.forward(beta, theta).cpu().detach().numpy()
+        result = np.concatenate((result, fwd[None, :]), axis=0)
 
     import ioutil
-    ioutil.wrapped_write_pickle(destination, Hres)
+    ioutil.wrapped_write_np(destination, result)
 
-def dump_result(x, invhess_L, reco, Htemplate, Nboot, destination, ptoverflow):
-    import hist
-    import pickle
-
+def dump_result(x, invhess_L, reco, Nboot, destination):
     if type(x) is torch.Tensor:
         x = x.cpu().detach().numpy()
     if type(reco) is torch.Tensor:
         reco = reco.cpu().detach().numpy()
 
-    Hres = build_template_hist(Htemplate, Nboot, ptoverflow)
-    shape = list(Hres.values(flow=True).shape[1:])
-
-    Hres.view(flow=True)[0] += (x * reco).reshape(shape)
+    nominal = x*reco[None, :]
 
     print("Generating toys from multivariate gaussian...")
     import statutil
     samples = statutil.multivariate_gaussian_rvs(x, invhess_L, Nboot)
     samples[samples < 0] = 0  # Ensure non-negative samples
 
-    Hres.view(flow=True)[1:] += (samples * reco[None,:]).reshape((Hres.axes['bootstrap'].size-1, *shape))
+    boots = samples * reco[None, :]
+
+    result = np.concatenate((nominal, boots), axis=0)
 
     import ioutil
-    ioutil.wrapped_write_pickle(destination, Hres)
+    ioutil.wrapped_write_np(destination, result)

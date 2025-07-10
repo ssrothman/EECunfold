@@ -50,9 +50,9 @@ def make_chi2_latextable(chi2_l, label_l, path):
         f.write('\\end{tabular}\n')
     print(f"Latex table saved to {path}")
 
-def get_chi2(H1, H2, normalize=False):
-    Ys1 = H1.values(flow=True).reshape(H1.axes['bootstrap'].size, -1)
-    Ys2 = H2.values(flow=True).reshape(H2.axes['bootstrap'].size, -1)
+def get_chi2(vals1, vals2, normalize=False):
+    Ys1 = vals1.copy()
+    Ys2 = vals2.copy()
 
     if normalize:
         Ys1 /= Ys1.sum(axis=1, keepdims=True)
@@ -202,28 +202,52 @@ def plot_bkg_templates(LOSS, isCMS=True, savefig=None):
     finally:
         plt.close(fig)
 
-def plot_purity_stability(LOSS, isCMS=True, savefig=None):
+def plot_purity_stability(LOSS, isCMS=True, savefig=None, binning=None, cut=None):
+    if cut is not None and binning is None:
+        raise ValueError("If 'cut' is provided, 'binning' must also be provided.")
+
     fig = plt.figure(figsize=config['Figure_Size'])
     try:
         ax = fig.add_subplot(111)
         if isCMS:
             hep.cms.label(ax=ax, data=False, label=config['Approval_Text'])
 
-        x = np.arange(len(LOSS.rho0), dtype=np.float64) + 0.5
         T = LOSS.transfer0
+
+        if cut is not None:
+            T = binning.get_slice(T.T, **cut)
+            T = binning.get_slice(T.T, **cut)
+
+            labeltext = ''
+            fnametext = ''
+            for key, value in cut.items():
+                labeltext += '%g < %s < %g\n' % (value[0], key, value[1])
+                fnametext += '_%g-%s-%g' % (value[0], key, value[1])
+            labeltext = labeltext[:-1]
+        else:
+            labeltext = None
+            fnametext = ''
+
+        x = np.arange(T.shape[0], dtype=np.float64) + 0.5
+
         purity = np.diag(T) / np.sum(T, axis=1)
         stability = np.diag(T) / np.sum(T, axis=0)
         ax.errorbar(x, purity, xerr=0.5, fmt='o', label='Purity')
         ax.errorbar(x, stability, xerr=0.5, fmt='o', label='Stability')
         ax.set_xlabel("Bin")
         ax.set_ylabel("Purity / Stability")
+        if labeltext is not None:
+            ax.text(0.05, 0.05, labeltext,
+                    transform=ax.transAxes, fontsize=46,
+                    bbox=dict(facecolor='white', alpha=0.5))
+
         ax.legend(loc='best')
         ax.axhline(1, color='black', linestyle='--', linewidth=0.5)
         ax.set_ylim(0, 1.1)
         plt.tight_layout()
 
         if savefig is not None:
-            filename = savefig + '_purity_stability.png'
+            filename = savefig + '%s_purity_stability.png'%fnametext
             wrapped_savefig(filename)
         else:
             plt.show()

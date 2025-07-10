@@ -26,11 +26,10 @@ parser.add_argument('--systlist', type=str, nargs='*',
 
 parser.add_argument('--device', type=str, default=None)
 parser.add_argument('--projectAxes', type=str, nargs='*', default=None)
-parser.add_argument('--rebin_r', type=int, default=1)
-parser.add_argument('--rebin_c', type=int, default=1)
-parser.add_argument('--ptoverflow', type=str, default=None)
+parser.add_argument('--rebinning', type=str, default=None)
 
 parser.add_argument('--smoothed', action='store_true',)
+parser.add_argument('--oldbinning', action='store_true',)
 
 parser.add_argument('--force', action='store_true')
 
@@ -50,17 +49,19 @@ reco_folder = filenames.reco_folder(
     args.RecoTag, args.RecoSample, args.reco_nboot,
     args.reco_statN, args.reco_statK, args.reco_firstN,
     args.reco_objsyst, args.reco_wtsyst,
-    args.projectAxes, args.rebin_r, args.rebin_c,
-    args.ptoverflow
+    args.projectAxes, args.rebinning,
 )
 loss_folder = filenames.loss_folder(
     args.GenTag, args.GenSample, args.gen_nboot,
     args.gen_statN, args.gen_statK, args.gen_firstN,
     args.systlist, 
-    args.projectAxes, args.rebin_r, args.rebin_c,
-    args.ptoverflow,
+    args.projectAxes, args.rebinning,
     args.smoothed
 )
+if args.oldbinning:
+    loss_folder += '_oldbinning'
+    reco_folder += '_oldbinning'
+
 loss_name = os.path.basename(loss_folder)
 
 base_folder = os.path.join(reco_folder, loss_name)

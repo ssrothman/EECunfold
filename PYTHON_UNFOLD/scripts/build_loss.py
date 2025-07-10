@@ -19,9 +19,6 @@ parser.add_argument('--one_sided', type=str, nargs='*',
                     default=['TRK_EFF'])
 
 parser.add_argument('--projectAxes', type=str, nargs='*', default=None)
-parser.add_argument('--rebin_r', type=int, default=1)
-parser.add_argument('--rebin_c', type=int, default=1)
-parser.add_argument('--ptoverflow', type=str, default=None)
 
 parser.add_argument('--boot_per_file', type=int, default=-1, nargs='+')
 parser.add_argument('--reweight', type=str, default=None)
@@ -30,6 +27,8 @@ parser.add_argument('--r123type', type=str, default=None)
 parser.add_argument('--force', action='store_true')
 
 parser.add_argument('--oldbinning', action='store_true',)
+
+parser.add_argument('--rebinning', type=str, default=None)
 
 parser.add_argument('--which_objsysts', type=str, nargs='*',
                     default=['JER', 'JES', 'UNCLUSTERED', 'CH', 'TRK_EFF'],
@@ -43,6 +42,7 @@ import numpy as np
 import filenames
 import ioutil
 import hist
+import indexing
 
 hists = {
     "reco" : {},
@@ -52,17 +52,6 @@ hists = {
     "unmatchedGen" : {},
     "untransferedGen" : {},
     "transfer" : {}
-}
-
-rebincut = {
-    'r' : slice(None, None, hist.rebin(args.rebin_r)),
-    'c' : slice(None, None, hist.rebin(args.rebin_c))
-}
-rebincut_t = {
-    'r_reco' : slice(None, None, hist.rebin(args.rebin_r)),
-    'c_reco' : slice(None, None, hist.rebin(args.rebin_c)),
-    'r_gen' : slice(None, None, hist.rebin(args.rebin_r)),
-    'c_gen' : slice(None, None, hist.rebin(args.rebin_c))
 }
 
 if args.projectAxes is not None:
@@ -84,10 +73,6 @@ for what in hists.keys():
             from_bkp=args.oldbinning,
             silent=True
     )
-    if what == 'transfer':
-        hists[what]['nominal'] = hists[what]['nominal'][rebincut_t]
-    else:
-        hists[what]['nominal'] = hists[what]['nominal'][rebincut]
             
     if args.nboot >= 0 and what != 'transfer':
         if hists[what]['nominal'].axes['bootstrap'].size < args.nboot + 1:
@@ -125,8 +110,9 @@ outpath = filenames.loss_folder(
     args.Tag, args.Sample, actual_nboot,
     args.statN, args.statK, args.firstN,
     args.two_sided + args.one_sided, 
-    args.projectAxes, args.rebin_r, args.rebin_c,
-    args.ptoverflow, False)
+    args.projectAxes, args.rebinning,
+    False)
+
 if args.oldbinning:
     outpath += '_oldbinning'
 
@@ -135,6 +121,28 @@ if os.path.exists(outpath) and not args.force:
     import sys
     sys.exit(0)
 os.makedirs(outpath, exist_ok=True)
+
+binning = indexing.Binning()
+binning.setup_from_histogram(hists['reco']['nominal'][{'bootstrap' : 0}])
+
+MCreco = hists['reco']['nominal'][{'bootstrap' : 0}].values(flow=True).ravel()
+MCgen = hists['gen']['nominal'][{'bootstrap' : 0}].values(flow=True).ravel()
+MCdenom = np.where(MCreco==0, 1, MCreco)
+MCx0 = MCgen / MCdenom
+MCx0[MCreco == 0] = 1
+
+if args.rebinning is not None:
+    print("Rebinning reco")
+    rebinning_path = os.path.join('rebinnings', args.rebinning + '.json')
+    MCx0, rebinning = binning.rebin(
+            MCx0, rebinning_path
+    )
+    rebinning.dump_to_file(os.path.join(outpath, 'Binning.json'))
+else:
+    rebinning_path = None
+    binning.dump_to_file(os.path.join(outpath, 'Binning.json'))
+
+ioutil.wrapped_write_np(os.path.join(outpath, 'MCx0.npy'), MCx0.ravel())
 
 wtsysts_to_load = []
 objsysts_to_load = []
@@ -159,10 +167,6 @@ for what in hists.keys():
                 from_bkp=args.oldbinning,
                 silent=True
             )
-            if what == 'transfer':
-                hists[what][wtsyst+updnname] = hists[what][wtsyst+updnname][rebincut_t]
-            else:
-                hists[what][wtsyst+updnname] = hists[what][wtsyst+updnname][rebincut]
 
             if args.projectAxes is not None:
                 if what == 'transfer':
@@ -184,10 +188,6 @@ for what in hists.keys():
                 from_bkp=args.oldbinning,
                 silent=True
             )
-            if what == 'transfer':
-                hists[what][objsyst+updnname] = hists[what][objsyst+updnname][rebincut_t]
-            else:
-                hists[what][objsyst+updnname] = hists[what][objsyst+updnname][rebincut]
 
             if args.projectAxes is not None:
                 if what == 'transfer':
@@ -201,38 +201,12 @@ import hist
 from importlib import reload
 import pickle
 
-thecut = {}
-thetcut = {}
-
 print("SETUP LOSS")
 LOSS = minimizer.setup_loss(hists, 
                             two_sided_systs=args.two_sided,
                             one_sided_systs=args.one_sided,
-                            cut={},
-                            tcut={},
-                            ptoverflow=args.ptoverflow)
+                            basebinning = binning,
+                            rebinning_path = rebinning_path)
 
 LOSS.write_to_disk(outpath)
 
-#initial guess can be perfect from MC?
-MCreco = hists['reco']['nominal'][{'bootstrap' : 0}][thecut].values(flow=True)
-MCgen =   hists['gen']['nominal'][{'bootstrap' : 0}][thecut].values(flow=True)
-if args.ptoverflow is not None:
-    if args.ptoverflow == 'merge':
-        slice_gen = list(range(MCgen.shape[0]))
-        slice_gen.pop(-1)
-        slice_reco = list(range(MCreco.shape[0]))
-        slice_reco.pop(-1)
-        MCgen = np.add.reduceat(MCgen, slice_gen, axis=0)
-        MCreco = np.add.reduceat(MCreco, slice_reco, axis=0)
-    elif args.ptoverflow == 'drop':
-        MCgen = MCgen[:-1]
-        MCreco = MCreco[:-1]
-    else:
-        raise ValueError("Invalid ptoverflow option: %s. Use 'merge' or 'drop'." % args.ptoverflow)
-
-MCdenom = np.where(MCreco==0, 1, MCreco)
-MCx0 = MCgen / MCdenom
-MCx0[MCreco == 0] = 1
-
-ioutil.wrapped_write_np(os.path.join(outpath, 'MCx0.npy'), MCx0.ravel())
