@@ -49,9 +49,15 @@ def make_chi2_latextable(chi2_l, label_l, path):
         f.write('\\end{tabular}\n')
     print(f"Latex table saved to {path}")
 
-def get_chi2(vals1, vals2, normalize=False):
+def get_chi2(vals1, vals2, normalize=False, binning=None, cut=None):
     Ys1 = vals1.copy()
     Ys2 = vals2.copy()
+
+    if cut is not None:
+        Ys1 = binning.get_slice(Ys1.T, **cut).T
+        Ys2 = binning.get_slice(Ys2.T, **cut).T
+        print(Ys1.shape)
+        print(Ys2.shape)
 
     if normalize:
         Ys1 /= Ys1.sum(axis=1, keepdims=True)
@@ -269,6 +275,7 @@ def plot_purity_stability(LOSS, isCMS=True, savefig=None, binning=None, cut=None
         ax.legend(loc='best')
         ax.axhline(1, color='black', linestyle='--', linewidth=0.5)
         ax.set_ylim(0, 1.1)
+        ax.axhline(0.5, color='red', linestyle='--', linewidth=0.5)
         plt.tight_layout()
 
         if savefig is not None:

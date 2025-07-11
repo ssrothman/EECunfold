@@ -3,6 +3,16 @@ import itertools
 import json
 import os
 
+class Index:
+    def __init__(self, val):
+        self.val = val
+
+    def __repr__(self):
+        return f"Index({self.val})"
+
+    def __str__(self):
+        return f"Index({self.val})"
+
 '''
 Not part of the public interface
 '''
@@ -103,6 +113,9 @@ class BinningBlock:
         if edge is None: #special case, needed for slices
             return None
 
+        if type(edge) is Index:
+            return edge.val
+
         try:
             result = self.ax_details[name]['edges'].index(edge)
         except:
@@ -114,7 +127,7 @@ class BinningBlock:
         return result
 
     def edges_to_indices(self, name, edges):
-        if type(edges) in [int, float]:
+        if type(edges) in [int, float, Index]:
             return self.edge_to_index(name, edges)
         elif type(edges) is list:
             return [self.edge_to_index(name, edge) for edge in edges]
@@ -222,16 +235,67 @@ class BinningBlock:
             edges = theedges[name]
             allowedmin = self.ax_details[name]['minedge']
             allowedmax = self.ax_details[name]['maxedge']
-            if type(edges) in [float, int]:
-                return edges >= allowedmin and edges <= allowedmax
-            elif type(edges) is slice:
-                return (edges.start is None or edges.start >= allowedmin) and \
-                        (edges.stop is None or edges.stop <= allowedmax)
-            elif type(edges) in [list, tuple]:
-                return np.min(edges) >= allowedmin and \
-                        np.max(edges) <= allowedmax
+            if type(edges) not in [list,tuple]:
+                raise ValueError(f"Edges for axis {name} must be a list or tuple.")
+            elif len(edges) != 2:
+                raise ValueError(f"Edges for axis {name} must contain exactly two elements: (min, max).")
+
+            if type(edges[0]) in [int, float]:
+                if edges[0] < allowedmin:
+                    return False
+            elif type(edges[0]) is Index:
+                if edges[0].val < 0 or edges[0].val > self.ax_details[name]['extent']:
+                    return False
             else:
-                raise ValueError(f"Invalid type for axis {name}: {type(edges)}")
+                raise ValueError(f"Invalid type for edge {edges[0]} on axis {name}. Expected int, float, or Index.")
+
+            if type(edges[1]) in [int, float]:
+                if edges[1] > allowedmax:
+                    return False
+            elif type(edges[1]) is Index:
+                if edges[1].val < 0 or edges[1].val > self.ax_details[name]['extent']:
+                    return False
+            else:
+                raise ValueError(f"Invalid type for edge {edges[1]} on axis {name}. Expected int, float, or Index.")
+
+        return True
+
+    def clip_edges_to_block(self, **theedges):
+        for name in theedges:
+            if name not in self.axis_names:
+                raise ValueError(f"Invalid axis name: {name}")
+
+        clippededges = {}
+        for name in theedges:
+            edges = theedges[name]
+            allowedmin = self.ax_details[name]['minedge']
+            allowedmax = self.ax_details[name]['maxedge']
+            if type(edges) not in [list, tuple]:
+                raise ValueError(f"Edges for axis {name} must be a list or tuple.")
+            elif len(edges) != 2:
+                raise ValueError(f"Edges for axis {name} must contain exactly two elements: (min, max).")
+
+            if type(edges[0]) in [int, float]:
+                clippedmin = max(edges[0], allowedmin)
+            elif type(edges[0]) is Index:
+                clippedmin = edges[0]
+            else:
+                raise ValueError(f"Invalid type for edge {edges[0]} on axis {name}. Expected int, float, or Index.")
+
+            if type(edges[1]) in [int, float]:
+                clippedmax = min(edges[1], allowedmax)
+            elif type(edges[1]) is Index:
+                clippedmax = edges[1]
+            else:
+                raise ValueError(f"Invalid type for edge {edges[1]} on axis {name}. Expected int, float, or Index.")
+
+            if type(clippedmin) in [int, float] and type(clippedmax) in [int, float] and clippedmax <= clippedmin:
+                return None
+
+            clippededges[name] = (clippedmin, clippedmax)
+
+        return clippededges
+
 
 class Binning:
     def __init__(self):
@@ -293,6 +357,11 @@ class Binning:
         if np.sum(in_block) == 0:
             raise ValueError("No block contains the specified indices.")
         elif np.sum(in_block) > 1:
+            print("Multiple blocks contain the specified indices.")
+            print("Indices:")
+            for name in theindices:
+                print("\t",name, ':', theindices[name])
+            print("Blocks:", np.where(in_block)[0])
             raise ValueError("Multiple blocks contain the specified indices.")
         else:
             whichblock = np.argmax(in_block)
@@ -312,14 +381,38 @@ class Binning:
     This is a useful hack, as slicing can be slow for really big arrays
     '''
     def get_slice(self, data, **theedges):
-        in_block = np.zeros(len(self.blocks), dtype=bool)
+        in_block = np.ones(len(self.blocks), dtype=bool)
         for i, block in enumerate(self.blocks):
-            if block.edges_in_block(**theedges):
-                in_block[i] = True
+            if not block.edges_in_block(**theedges):
+                in_block[i] = False
 
         if np.sum(in_block) == 0:
-            raise ValueError("No block contains the specified edges.")
+            print("Warning: edges cover multiple blocks. This functionality is experimental.")
+            overlap_block = np.ones(len(self.blocks), dtype=bool)
+            clipped_edges = []
+            for i, block in enumerate(self.blocks):
+                clipped = block.clip_edges_to_block(**theedges)
+                if clipped is None:
+                    overlap_block[i] = False
+                    clipped_edges.append(None)
+                else:
+                    clipped_edges.append(clipped)
+            if np.sum(overlap_block) == 0:
+                raise ValueError("Somehow multiple blocks contain the edges, but also none of them do. This must be a bug")
+
+            result = np.empty((0, *data.shape[1:]), dtype=data.dtype)
+            for i, block in enumerate(self.blocks):
+                if overlap_block[i]:
+                    theslice = block.get_slice_from_edges(data, **clipped_edges[i])
+                    result = np.append(result, theslice, axis=0)
+            return result
+
         elif np.sum(in_block) > 1:
+            print("Multiple blocks contain the specified edges.")
+            print("Edges:")
+            for name in theedges:
+                print("\t", name, ':', theedges[name])
+            print("Blocks:", np.where(in_block)[0])
             raise ValueError("Multiple blocks contain the specified edges.")
         else:
             whichblock = np.argmax(in_block)
