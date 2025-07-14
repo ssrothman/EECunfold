@@ -27,6 +27,8 @@ whichcov_group = parser.add_mutually_exclusive_group(required=False)
 whichcov_group.add_argument('--normed', action='store_true')
 whichcov_group.add_argument('--direct', action='store_true')
 
+parser.add_argument('--what', type=str, default='reco',)
+
 args = parser.parse_args()
 
 import filenames
@@ -37,6 +39,7 @@ recofolder = filenames.reco_folder(
         args.statN, args.statK, args.firstN,
         args.objsyst, args.wtsyst, 
         args.projectAxes, args.rebinning,
+        args.what
 )
 if args.oldbinning:
     recofolder += '_oldbinning'

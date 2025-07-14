@@ -390,9 +390,9 @@ def parse_reco_name(name):
     return tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, projectAxes, rebinning
 
 def reco_name(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, 
-              projectAxes, rebinning):
+              projectAxes, rebinning, what):
     if nboot < 0:
-        options = os.listdir(os.path.join(datasets.basedir, tag, sample, 'EECres4tee', 'CONSTRUCTED_RECO')) 
+        options = os.listdir(os.path.join(datasets.basedir, tag, sample, 'EECres4tee', 'CONSTRUCTED_%s'%what.upper())) 
         options = list(filter(lambda x: x.startswith(f'{tag}_{sample}_'), options))
 
         if statN > 0:
@@ -458,12 +458,12 @@ def reco_name(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst,
     return name
 
 def reco_folder(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, 
-                projectAxes, rebinning):
+                projectAxes, rebinning, what):
     name = reco_name(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, 
-                     projectAxes, rebinning)
+                     projectAxes, rebinning, what)
 
     path = os.path.join(
         datasets.basedir, tag, sample,
-        'EECres4tee', 'CONSTRUCTED_RECO',
+        'EECres4tee', 'CONSTRUCTED_%s'%what.upper(),
         name)
     return path

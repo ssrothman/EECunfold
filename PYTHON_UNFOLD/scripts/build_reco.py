@@ -60,13 +60,10 @@ recofolder = filenames.reco_folder(
         args.Tag, args.Sample, actual_nboot,
         args.statN, args.statK, args.firstN,
         args.objsyst, args.wtsyst, 
-        args.projectAxes, args.rebinning
+        args.projectAxes, args.rebinning, args.what
 )
 if args.oldbinning:
     recofolder += '_oldbinning'
-
-if args.what != 'reco':
-    recofolder = recofolder.replace('RECO', capswhat)
 
 if os.path.exists(recofolder) and not args.force:
     print(f"Folder {recofolder} already exists. Use --force to overwrite.")

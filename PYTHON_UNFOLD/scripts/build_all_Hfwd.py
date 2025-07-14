@@ -57,7 +57,7 @@ reco_folder = filenames.reco_folder(
     args.RecoTag, args.RecoSample, args.reco_nboot,
     args.reco_statN, args.reco_statK, args.reco_firstN,
     args.reco_objsyst, args.reco_wtsyst, 
-    args.projectAxes, args.rebinning,
+    args.projectAxes, args.rebinning, 'reco',
 )
 loss_folder = filenames.loss_folder(
     args.GenTag, args.GenSample, args.gen_nboot,
