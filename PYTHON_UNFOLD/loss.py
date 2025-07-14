@@ -117,11 +117,34 @@ def smooth_Tmat_score_3d(T3d, model, monotonic_weight=0):
 
     return loss
 
-def setup_Tdiagfit(T0, Nm=5, device='cuda'):
-    T = T0.reshape((7, 5, 15, 15, 7, 5, 15, 15))
-    Tdiag = np.einsum('abciabcj->abcij', T)
-    Tdiag = Tdiag.reshape((-1, 15, 15))
+def setup_Tdiagfit(T0, Nm=5, binning=None, device='cuda'):
+    #T = T0.reshape((7, 5, 15, 15, 7, 5, 15, 15))
+    #Tdiag = np.einsum('abciabcj->abcij', T)
+    #Tdiag = Tdiag.reshape((-1, 15, 15))
+    Nc = binning.blocks[0].ax_details['c']['extent']
+    Tdiag = np.zeros((0, Nc, Nc))
+    for block in binning.blocks:
+        if block.ax_details['c']['extent'] != Nc:
+            raise ValueError("All blocks must have the same c-axis extent")
+        for ipt in range(block.ax_details['pt']['extent']-1):
+            for iR in range(block.ax_details['R']['extent']-1):
+                for ir in range(block.ax_details['r']['extent']-1):
+                    nextT = block.get_slice_from_indices(
+                            T0.T,
+                            pt=(ipt, ipt+1),
+                            R=(iR, iR+1),
+                            r=(ir, ir+1),
+                    )
+                    nextT = block.get_slice_from_indices(
+                            nextT.T,
+                            pt=(ipt, ipt+1),
+                            R=(iR, iR+1),
+                            r=(ir, ir+1),
+                    )
+                    print(nextT.shape)
+                    Tdiag = np.append(Tdiag, nextT.reshape((1, Nc, Nc)), axis=0)
 
+    print(Tdiag.shape)
     Tdiag = torch.from_numpy(Tdiag).to(device)
     x0 = torch.zeros((Tdiag.shape[0], 2 * Nm + 1), dtype=Tdiag.dtype, device=Tdiag.device)
     x0[:, Nm] = 1.0  # Set the central value to 1.0
@@ -133,28 +156,40 @@ def setup_Tdiagfit(T0, Nm=5, device='cuda'):
         callback=lambda x: print("Loss: %g" % theloss(x.reshape(-1, 2 * Nm + 1))),
     )
     # Reshape the result back to the original shape
+    xpred = t3d_pred(
+        Tdiag.shape[0], Nm, Tdiag.shape[1], Tdiag.shape[2], res.x
+    ).cpu().detach().numpy()
+    final_pred = T0.copy()
+    i = 0
+    for block in binning.blocks:
+        for ipt in range(block.ax_details['pt']['extent']-1):
+            for iR in range(block.ax_details['R']['extent']-1):
+                for ir in range(block.ax_details['r']['extent']-1):
+                    block.assign_to_indices_2d(
+                        final_pred,
+                        xpred[i],
+                        pt=(ipt, ipt+1),
+                        R=(iR, iR+1),
+                        r=(ir, ir+1),
+                    )
+                    i += 1
 
-    final_pred = t3d_pred(Tdiag.shape[0], Nm, Tdiag.shape[1], Tdiag.shape[2], res.x)
-    final_pred = final_pred.reshape((7, 5, 15, 15, 15)).numpy(force=True)
-    eyeA = np.eye(7, dtype=final_pred.dtype)
-    eyeB = np.eye(5, dtype=final_pred.dtype)
-    eyeC = np.eye(15, dtype=final_pred.dtype)
-    bigeye = np.einsum('au,bv,cw->abcuvw', eyeA, eyeB, eyeC)[:,:,:,None,:,:,:,None]
-    final_pred = np.einsum('abcij,au,bv,cw->abciuvwj', final_pred, eyeA, eyeB, eyeC)
-    final_pred = np.where(bigeye==1, final_pred, T)
-    final_pred = final_pred.reshape(T0.shape)
+    print("is it different?")
+    print("T0", T0.sum())
+    print("final_pred", final_pred.sum())
+
     return res, final_pred
 
-def smooth_the_loss(LOSS):
+def smooth_the_loss(LOSS, binning):
     if LOSS.device != 'numpy':
         LOSS = LOSS.cpu().detach().numpy()
 
-    res, TP = setup_Tdiagfit(LOSS.transfer0, Nm=5)
+    res, TP = setup_Tdiagfit(LOSS.transfer0, Nm=5, binning=binning)
     LOSS.transfer0 = TP
     print("Transfer0 optimized:", res.success, res.message, res.fun.item())
     for i in range(LOSS.transferVariations.shape[0]):
         print(f"Optimizing TransferVariation {i}...")
-        res, TP = setup_Tdiagfit(LOSS.transferVariations[i], Nm=5)
+        res, TP = setup_Tdiagfit(LOSS.transferVariations[i], Nm=5, binning=binning)
         LOSS.transferVariations[i] = TP
         print(f"TransferVariation {i} optimized:", res.success, res.message, res.fun.item())
     return LOSS

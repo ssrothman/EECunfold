@@ -223,6 +223,26 @@ class BinningBlock:
         indices = self.get_slice_indices(**indices)
         return np.take(data, self.offset+indices, axis=0)
 
+    def assign_to_indices(self, data, values, **indices):
+        indices = self.get_slice_indices(**indices)
+        data[indices + self.offset] = values
+
+    def assign_to_indices_2d(self, data, values, **indices):
+        indices = self.get_slice_indices(**indices)
+        indexmin = np.min(indices)
+        indexmax = np.max(indices)
+        indexrange = indexmax - indexmin +1
+        if indexrange != values.shape[0]:
+            raise ValueError("Can only assign to a continuous block of indices")
+        indexing = slice(self.offset + indexmin, 
+                         self.offset + indexmax + 1)
+        print("DATA SHAPE:", data.shape)
+        print("VALUES SHAPE:", values.shape)
+        print("INDICES SHAPE:", indices.shape)
+        print("INDEXED DATA SHAPE", data[indexing, indexing].shape)
+
+        data[indexing, indexing] = values
+
     def value_at(self, data, **indices):
         return data[self.offset+self.flatten_index(**indices)]
 
