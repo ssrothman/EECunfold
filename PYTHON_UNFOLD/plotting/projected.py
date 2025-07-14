@@ -361,7 +361,7 @@ def plot_eigvals(eigvals_l, label_l=None,
 
 def compare_1d(Ys_l, label_l, normalize=False, isCMS=True, isData=False, 
                logy=True, xoffset=0.1, what='value', pulls=False,
-               savefig=None, binning=None, cut=None):
+               savefig=None, binning=None, cut=None, calculate_chi2=False):
     fig = plt.figure(figsize=config['Figure_Size'])
     try:
         (ax_main, ax_ratio) = fig.subplots(
@@ -371,6 +371,12 @@ def compare_1d(Ys_l, label_l, normalize=False, isCMS=True, isData=False,
 
         if isCMS:
             hep.cms.label(ax=ax_main, data=isData, label=config['Approval_Text'])
+
+        labeltext = ''
+        if cut is not None:
+            for key, value in cut.items():
+                labeltext += '%g < %s < %g\n' % (value[0], key, value[1])
+            labeltext = labeltext[:-1]
 
         main_artists = []
         for i, (Ys, label) in enumerate(zip(Ys_l, label_l)):
@@ -402,11 +408,18 @@ def compare_1d(Ys_l, label_l, normalize=False, isCMS=True, isData=False,
         if cut is not None:
             Ys0 = binning.get_slice(Ys0.T, **cut).T
 
+        if calculate_chi2:
+            chi2s = []
         for i, (Ys,artist) in enumerate(zip(Ys_l[1:], main_artists[1:])):
             if cut is not None:
                 Ys = binning.get_slice(Ys.T, **cut).T
 
             ratio, ratioerr = get_ratio_vals_errs(Ys0, Ys, normalize=normalize, what=what)
+            if calculate_chi2:
+                chi2s.append(
+                    get_chi2(Ys0, Ys, normalize=normalize)
+                )
+
             x = np.arange(len(ratio), dtype=np.float64) + 0.5
             x += xoffset * (i+1)
             if pulls:
@@ -439,6 +452,23 @@ def compare_1d(Ys_l, label_l, normalize=False, isCMS=True, isData=False,
             ax_main.set_yscale('log')
 
         ax_main.legend(loc='best')
+
+        if labeltext:
+            ax_main.text(0.05, 0.05, labeltext,
+                         fontsize=32,
+                         transform=ax_main.transAxes,
+                         bbox=dict(facecolor='white', alpha=0.5))
+        if calculate_chi2:
+            chi2text = 'Chi2 (%d bins):\n'%(Ys0.shape[1])
+            for chi2, label in zip(chi2s, label_l[1:]):
+                chi2text += '%s: %.5g\n' % (label, chi2)
+            chi2text = chi2text[:-1]
+            ax_main.text(
+                0.95, 0.05, chi2text,
+                transform=ax_main.transAxes, fontsize=32,
+                bbox=dict(facecolor='white', alpha=0.5),
+                verticalalignment='bottom', horizontalalignment='right'
+            )
 
         plt.tight_layout()
 
