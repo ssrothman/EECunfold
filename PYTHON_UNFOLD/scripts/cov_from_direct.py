@@ -6,6 +6,7 @@ parser.add_argument('Sample', type=str)
 parser.add_argument('--statN', type=int, default=-1)
 parser.add_argument('--statK', type=int, default=-1)
 parser.add_argument('--firstN', type=int, default=-1)
+parser.add_argument('--nboot', type=int, default=-1,)
 parser.add_argument('--wtsyst', type=str, default='nominal')
 parser.add_argument('--objsyst', type=str, default='nominal')
 
@@ -31,7 +32,7 @@ import os
 import ioutil
 
 recofolder = filenames.reco_folder(
-    args.Tag, args.Sample, -1,
+    args.Tag, args.Sample, args.nboot,
     args.statN, args.statK, args.firstN, 
     args.objsyst, args.wtsyst, 
     args.projectAxes, args.rebinning,
@@ -46,7 +47,7 @@ if os.path.exists(output_path) and not args.force:
     sys.exit(0)
 
 cov = filenames.get_full_hist(
-    args.Tag, args.Sample, 0, 
+    args.Tag, args.Sample, args.nboot, 
     args.statN, args.statK, args.firstN,
     args.objsyst, args.wtsyst, 'directcov_%s'%args.what,
     args.reweight, args.r123type, 

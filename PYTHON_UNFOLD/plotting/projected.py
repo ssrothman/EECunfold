@@ -1,4 +1,5 @@
 from tqdm import tqdm
+import statutil
 import os
 import matplotlib.pyplot as plt
 import hist
@@ -48,46 +49,6 @@ def make_chi2_latextable(chi2_l, label_l, path):
             f.write(f'{label} & {chi2:.7g} \\\\\n')
         f.write('\\end{tabular}\n')
     print(f"Latex table saved to {path}")
-
-def get_chi2(vals1, vals2, normalize=False, binning=None, cut=None):
-    Ys1 = vals1.copy()
-    Ys2 = vals2.copy()
-
-    if cut is not None:
-        Ys1 = binning.get_slice(Ys1.T, **cut).T
-        Ys2 = binning.get_slice(Ys2.T, **cut).T
-        print(Ys1.shape)
-        print(Ys2.shape)
-
-    if normalize:
-        Ys1 /= Ys1.sum(axis=1, keepdims=True)
-        Ys2 /= Ys2.sum(axis=1, keepdims=True)
-    
-    nom1 = Ys1[0]
-    nom2 = Ys2[0]
-    boots1 = Ys1[1:]
-    boots2 = Ys2[1:]
-    DY1 = boots1 - nom1[None, :]
-    DY2 = boots2 - nom2[None, :]
-
-
-    cov1 = DY1.T @ DY1 / DY1.shape[0]
-    cov2 = DY2.T @ DY2 / DY2.shape[0]
-
-    if DY1.shape[0] == 0:
-        cov1 = np.zeros_like(cov2)
-    if DY2.shape[0] == 0:
-        cov2 = np.zeros_like(cov1)
-
-    covdiff = cov1 + cov2
-    diff = nom1 - nom2
-
-    import statutil
-    import fasteigenpy as eigen
-    solver = eigen.SelfAdjointEigenSolver(covdiff)
-    invcov, _ = statutil.inverse_from_eigenspectrum(solver) 
-    chi2 = diff @ invcov @ diff
-    return chi2
 
 def get_ratio_vals_errs(Ys_num, Ys_denom, normalize=False, what='value'):
 
@@ -417,7 +378,7 @@ def compare_1d(Ys_l, label_l, normalize=False, isCMS=True, isData=False,
             ratio, ratioerr = get_ratio_vals_errs(Ys0, Ys, normalize=normalize, what=what)
             if calculate_chi2:
                 chi2s.append(
-                    get_chi2(Ys0, Ys, normalize=normalize)
+                    statutil.get_chi2(Ys0, Ys, normalize=normalize)
                 )
 
             x = np.arange(len(ratio), dtype=np.float64) + 0.5

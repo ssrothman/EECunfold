@@ -71,6 +71,55 @@ def multivariate_gaussian_rvs(mu, L, Nsamples):
 
     return (mu[:, None] + L @ standard_normal).T
 
+def inverse_and_eigenspectrum(matrix, 
+                              clip_lowest_N=0,
+                              force_positive=True,
+                              return_sqrt=False,
+                              wrt_corr=True):
+    print("Computing Eigendecomposition...")
+    if wrt_corr:
+        err = np.sqrt(np.diag(matrix))
+        err[err == 0] = 1
+        inverr = 1 / err
+        corr = np.diag(inverr) @ matrix @ np.diag(inverr)
+
+        solver = eigen.SelfAdjointEigenSolver(corr)
+    else:
+        solver = eigen.SelfAdjointEigenSolver(matrix)
+
+    if solver.info() != eigen.ComputationInfo.Success:
+        print("Eigen decomposition failed")
+        print(solver.info())
+        raise RuntimeError("Eigen decomposition failed")
+
+    print("Inverting...")
+    if return_sqrt:
+        inverse, reconstructed, sqrt_inverse, sqrt_reconstructed = inverse_from_eigenspectrum(
+            solver, 
+            clip_lowest_N=clip_lowest_N,
+            force_positive=force_positive,
+            return_sqrt=True
+        )
+    else:
+        inverse, reconstructed = inverse_from_eigenspectrum(
+            solver, 
+            clip_lowest_N=clip_lowest_N,
+            force_positive=force_positive,
+            return_sqrt=False
+        )
+
+    if wrt_corr:
+        inverse = np.diag(inverr) @ inverse @ np.diag(inverr)
+        reconstructed = np.diag(err) @ reconstructed @ np.diag(err)
+        if return_sqrt:
+            sqrt_inverse = np.diag(inverr) @ sqrt_inverse 
+            sqrt_reconstructed = np.diag(err) @ sqrt_reconstructed 
+
+    if return_sqrt:
+        return solver, inverse, reconstructed, sqrt_inverse, sqrt_reconstructed
+    else:
+        return solver, inverse, reconstructed
+
 def inverse_from_eigenspectrum(solver, 
                                clip_lowest_N=0,
                                force_positive=True,
@@ -102,3 +151,23 @@ def inverse_from_eigenspectrum(solver,
         return inverse, reconstructed, sqrt_inverse, sqrt_reconstructed
     else:
         return inverse, reconstructed
+
+def get_chi2(vals1, vals2, cov1, cov2, binning=None, cut=None):
+    covdiff = cov1 + cov2
+    diff = vals1 - vals2
+
+    if cut is not None:
+        diff = binning.get_slice(diff.T, **cut).T
+        covdiff = binning.get_slice(covdiff.T, **cut)
+        covdiff = binning.get_slice(covdiff.T, **cut)
+
+    _, invcov, _ = inverse_and_eigenspectrum(
+            covdiff,
+            clip_lowest_N=0,
+            force_positive=True,
+            return_sqrt=False,
+            wrt_corr=True
+    )
+    chi2 = diff @ invcov @ diff
+
+    return chi2
