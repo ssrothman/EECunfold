@@ -170,4 +170,99 @@ def get_chi2(vals1, vals2, cov1, cov2, binning=None, cut=None):
     )
     chi2 = diff @ invcov @ diff
 
-    return chi2
+    return chi2, len(diff)
+
+def normalize_distribution(vals, cov, return_N = False):
+    '''
+    Covariance of normalized distribution is worked out in 
+    the statistical reference section of the AN. 
+    The correlation between each bin and the normalization factor
+    results in a small decrease in uncertainty
+    '''
+    N = vals.sum()
+
+    result_vals = vals/N
+
+    sumcov_dim0 = np.sum(cov, axis=0)
+    sumcov_dim1 = np.sum(cov, axis=1)
+    sumcov_total = np.sum(cov)
+
+    result_cov_term1 = cov 
+    result_cov_term2 = -np.outer(result_vals, sumcov_dim0) 
+    result_cov_term3 = -np.outer(sumcov_dim1, result_vals) 
+    result_cov_term4 = np.outer(result_vals, result_vals) * sumcov_total 
+
+    result_cov = (result_cov_term1 +
+                  result_cov_term2 +
+                  result_cov_term3 +
+                  result_cov_term4) / (N * N)
+
+    if return_N:
+        return result_vals, result_cov, N
+    else:
+        return result_vals, result_cov
+
+def conormalize_distributions(vals1, cov1, vals2, cov2, cov12):
+    result_vals1, result_cov1, N1 = normalize_distribution(vals1, cov1, return_N=True)
+    result_vals2, result_cov2, N2 = normalize_distribution(vals2, cov2, return_N=True)
+
+    if cov12 is not None:
+        sumcov_dim0 = np.sum(cov12, axis=0)
+        sumcov_dim1 = np.sum(cov12, axis=1)
+        sumcov_total = np.sum(cov12)
+
+        result_cov12_term1 = cov12 
+        result_cov12_term2 = -np.outer(result_vals1, sumcov_dim0)
+        result_cov12_term3 = -np.outer(sumcov_dim1, result_vals2)
+        result_cov12_term4 = np.outer(result_vals1, result_vals2) * sumcov_total
+
+        result_cov12 = (result_cov12_term1 +
+                        result_cov12_term2 +
+                        result_cov12_term3 +
+                        result_cov12_term4) / (N1 * N2)
+    else:
+        result_cov12 = None
+
+    return result_vals1, result_cov1, result_vals2, result_cov2, result_cov12
+
+def sum_distribution(vals1, cov1, vals2, cov2, cov12):
+    result_vals = vals1 + vals2
+
+    result_cov = cov1 + cov2
+    if cov12 is not None:
+        result_cov += cov12 + cov12.T
+
+    return result_vals, result_cov
+
+def difference_distribution(vals1, cov1, vals2, cov2, cov12):
+    result_vals = vals1 - vals2
+
+    result_cov = cov1 + cov2
+    if cov12 is not None:
+        result_cov -= cov12 + cov12.T
+
+    return result_vals, result_cov
+
+def product_distribution(vals1, cov1, vals2, cov2, cov12):
+    result_vals = vals1 * vals2
+
+    result_cov = np.outer(vals1, vals1) * cov2 + np.outer(vals2, vals2) * cov1 
+    if cov12 is not None:
+        term = np.outer(vall2, vals1) * cov12
+        result_cov += term + term.T
+
+    return result_vals, result_cov
+
+def quotient_distribution(vals1, cov1, vals2, cov2, cov12):
+    result_vals = vals1 / vals2
+
+    vals2denom = np.outer(1/vals2, 1/vals2)
+    term1 = vals2denom * cov1
+    term2 = vals2denom * vals2denom * np.outer(vals1, vals2) * cov2
+    result_cov = term1 + term2
+
+    if cov12 is not None:
+        term3 = vals2denom * result_vals[None, :] * cov12
+        result_cov -= term3 + term3.T
+
+    return result_vals, result_cov

@@ -22,22 +22,24 @@ def wrapped_savefig(path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     plt.savefig(path, dpi=config['DPI'], bbox_inches='tight', format='png')
 
-def get_vals_errs(Ys, normalize=False):
-    if Ys.shape[0] == 1:
-        # If there's only one bootstrap sample, we can't compute an error
-        return Ys[0], np.zeros_like(Ys[0])
-
-    nom = Ys[0]
-    boots = Ys[1:]
-
+def get_vals_errs(vals, cov, normalize=False, what='value'):
     if normalize:
-        nom /= nom.sum()
-        boots /= boots.sum(axis=1, keepdims=True)
+        vals, cov = statutil.normalize_distribution(vals, cov)
 
-    DY = boots - nom[None, :]
-    cov = DY.T @ DY / DY.shape[0]
     err1D = np.sqrt(np.diag(cov))
-    return nom, err1D
+
+    if what == 'value' or what == 'valuePull':
+        pass
+    elif what == 'error':
+        vals = err1D
+        err1D = np.zeros_like(vals)
+    elif what == 'relativeError':
+        vals = err1D / vals
+        err1D = np.zeros_like(vals)
+    else:
+        raise ValueError("Invalid 'what' parameter: %s" % what)
+
+    return vals, err1D
 
 def make_chi2_latextable(chi2_l, label_l, path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -50,58 +52,48 @@ def make_chi2_latextable(chi2_l, label_l, path):
         f.write('\\end{tabular}\n')
     print(f"Latex table saved to {path}")
 
-def get_ratio_vals_errs(Ys_num, Ys_denom, normalize=False, what='value'):
-
-    if what == 'value':
-        if Ys_num.shape[0] < Ys_denom.shape[0]:
-            Ys_denom = Ys_denom[:Ys_num.shape[0], :]
-        elif Ys_num.shape[0] > Ys_denom.shape[0]:
-            Ys_num = Ys_num[:Ys_denom.shape[0], :]
+def get_ratio_vals_errs(vals_num, vals_denom, 
+                        cov_num, cov_denom,
+                        normalize=False, what='value'):
+    '''
+    Assume independent num and denom for now
+    '''
 
     if normalize:
-        Ys_num /= Ys_num.sum(axis=1, keepdims=True)
-        Ys_denom /= Ys_denom.sum(axis=1, keepdims=True)
+        vals_num, cov_num, vals_denom, cov_denom, _ = \
+                statutil.conormalize_distributions(
+                    vals_num, cov_num, vals_denom, cov_denom,
+                    cov12 = None
+                )
 
-    if what == 'value':
-        ratios = Ys_num / Ys_denom
+    if what == 'value' or what == 'valuePull':
+        ratio, covratio = statutil.quotient_distribution(
+                vals_num, cov_num,
+                vals_denom, cov_denom,
+                cov12=None
+        )
+    elif what == 'error' or what =='relativeError':
+        err_num = np.sqrt(np.diag(cov_num))
+        err_denom = np.sqrt(np.diag(cov_denom))
 
-        nom = ratios[0]
-        boots = ratios[1:]
-        if boots.shape[0] == 0:
-            err1D = np.zeros_like(nom)
-        else:
-            DY = boots - nom[None, :]
-            cov = DY.T @ DY / DY.shape[0]
-            err1D = np.sqrt(np.diag(cov))
-    elif what == 'error':
-        nom_num = Ys_num[0]
-        nom_denom = Ys_denom[0]
-        boots_num = Ys_num[1:]
-        boots_denom = Ys_denom[1:]
-        DY_num = boots_num - nom_num[None, :]
-        DY_denom = boots_denom - nom_denom[None, :]
-        cov_num = DY_num.T @ DY_num / DY_num.shape[0]
-        cov_denom = DY_denom.T @ DY_denom / DY_denom.shape[0]
+        if what == 'relativeError':
+            err_num /= vals_num
+            err_denom /= vals_denom
 
-        nom = np.sqrt(np.diag(cov_num)) / np.sqrt(np.diag(cov_denom))
-        err1D = np.zeros_like(nom)
-    elif what == 'relativeError':
-        nom_num = Ys_num[0]
-        nom_denom = Ys_denom[0]
-        boots_num = Ys_num[1:]
-        boots_denom = Ys_denom[1:]
-        DY_num = boots_num - nom_num[None, :]
-        DY_denom = boots_denom - nom_denom[None, :]
-        cov_num = DY_num.T @ DY_num / DY_num.shape[0]
-        cov_denom = DY_denom.T @ DY_denom / DY_denom.shape[0]
+        ratio = err_num / err_denom
+        covratio = np.zeros((*err_num.shape, *err_num.shape))
 
-        err_num = np.sqrt(np.diag(cov_num)) / nom_num
-        err_denom = np.sqrt(np.diag(cov_denom)) / nom_denom
+        ratio = err_num / err_denom
+        covratio = np.zeros((*err_num.shape, *err_num.shape))
+    else:
+        raise ValueError("Invalid 'what' parameter: %s" % what)
 
-        nom = err_num / err_denom
-        err1D = np.zeros_like(nom)
+    err1D = np.sqrt(np.diag(covratio))
+    if what == 'valuePull':
+        ratio = (ratio - 1) / err1D
+        err1D = np.ones_like(err1D)
 
-    return nom, err1D
+    return ratio, err1D
 
 def plot_transfer_2d(LOSS, isCMS=True, savefig=None):
     fig = plt.figure(figsize=config['Figure_Size'])
@@ -124,16 +116,31 @@ def plot_transfer_2d(LOSS, isCMS=True, savefig=None):
     finally:
         plt.close(fig)
 
-def plot_transfer_scale(LOSS, isCMS=True, savefig=None):
+def plot_transfer_scale(LOSS, isCMS=True, savefig=None, binning=None, cut=None):
     fig = plt.figure(figsize=config['Figure_Size'])
     try:
         ax = fig.add_subplot(111)
         if isCMS:
             hep.cms.label(ax=ax, data=False, label=config['Approval_Text'])
         scale = np.sum(LOSS.transfer0, axis=0)
+
+        if cut is not None:
+            scale = binning.get_slice(scale.T, **cut).T
+            
+            labeltext = ''
+            for key, value in cut.items():
+                labeltext += '%g < %s < %g\n' % (value[0], key, value[1])
+            labeltext = labeltext[:-1]
+    
         ax.errorbar(np.arange(len(scale)) + 0.5, scale, xerr=0.5, fmt='o')
         ax.set_xlabel("Gen Bin")
         ax.set_ylabel("Transfer scale factor")
+
+        if cut is not None:
+            ax.text(0.05, 0.05, labeltext,
+                    transform=ax.transAxes, fontsize=46,
+                    bbox=dict(facecolor='white', alpha=0.5))
+
         plt.tight_layout()
 
         if savefig is not None:
@@ -234,9 +241,9 @@ def plot_purity_stability(LOSS, isCMS=True, savefig=None, binning=None, cut=None
                     bbox=dict(facecolor='white', alpha=0.5))
 
         ax.legend(loc='best')
-        ax.axhline(1, color='black', linestyle='--', linewidth=0.5)
+        ax.axhline(1, color='black', linestyle='--', linewidth=1.)
         ax.set_ylim(0, 1.1)
-        ax.axhline(0.5, color='red', linestyle='--', linewidth=0.5)
+        ax.axhline(0.5, color='red', linestyle='--', linewidth=1.)
         plt.tight_layout()
 
         if savefig is not None:
@@ -248,7 +255,7 @@ def plot_purity_stability(LOSS, isCMS=True, savefig=None, binning=None, cut=None
         plt.close(fig)
 
 def plot_cov_2d(cov, isCMS=True, data=False, correl=True,
-                savefig=None):
+                logz=False, savefig=None):
     fig = plt.figure(figsize=config['Figure_Size'])
     try:
         ax = fig.add_subplot(111)
@@ -259,14 +266,21 @@ def plot_cov_2d(cov, isCMS=True, data=False, correl=True,
             err = np.sqrt(np.diag(cov))
             corr = cov / np.outer(err, err)
 
-            q = ax.pcolormesh(corr, cmap='coolwarm', vmin=-1, vmax=1)
+            if logz:
+                q = ax.pcolormesh(np.abs(corr), cmap='Reds', norm=LogNorm())
+                fig.colorbar(q, ax=ax, pad=0.01, label='|Correlation|')
+            else:
+                q = ax.pcolormesh(corr, cmap='coolwarm', vmin=-1, vmax=1)
+                fig.colorbar(q, ax=ax, pad=0.01, label='Correlation')
 
-            fig.colorbar(q, ax=ax, pad=0.01, label='Correlation')
         else:
-            r = np.max(np.abs(cov))
-            q = ax.pcolormesh(cov, cmap='coolwarm', vmin=-r, vmax=r)
-
-            fig.colorbar(q, ax=ax, pad=0.01, label='Covariance')
+            if logz:
+                q = ax.pcolormesh(np.abs(corr), cmap='Reds', norm=LogNorm())
+                fig.colorbar(q, ax=ax, pad=0.01, label='|Covariance|')
+            else:
+                r = np.max(np.abs(cov))
+                q = ax.pcolormesh(cov, cmap='coolwarm', vmin=-r, vmax=r)
+                fig.colorbar(q, ax=ax, pad=0.01, label='Covariance')
 
         ax.set_xlabel("Bin")
         ax.set_ylabel("Bin")
@@ -320,9 +334,13 @@ def plot_eigvals(eigvals_l, label_l=None,
     finally:
         plt.close(fig)
 
-def compare_1d(Ys_l, label_l, normalize=False, isCMS=True, isData=False, 
-               logy=True, xoffset=0.1, what='value', pulls=False,
-               savefig=None, binning=None, cut=None, calculate_chi2=False):
+def compare_1d(vals_l, covs_l, label_l, 
+               normalize=False, what = 'value',
+               isCMS=True, isData=False, 
+               logy=True, xoffset=0.1,
+               binning=None, cut=None, 
+               savefig=None, calculate_chi2=False):
+
     fig = plt.figure(figsize=config['Figure_Size'])
     try:
         (ax_main, ax_ratio) = fig.subplots(
@@ -340,74 +358,74 @@ def compare_1d(Ys_l, label_l, normalize=False, isCMS=True, isData=False,
             labeltext = labeltext[:-1]
 
         main_artists = []
-        for i, (Ys, label) in enumerate(zip(Ys_l, label_l)):
+        for i, (val, cov, label) in enumerate(zip(vals_l, covs_l, label_l)):
             if cut is not None:
-                Ys = binning.get_slice(Ys.T, **cut).T
+                val = binning.get_slice(val.T, **cut).T
+                cov = binning.get_slice(cov.T, **cut)
+                cov = binning.get_slice(cov.T, **cut)
 
-            nom, err1D = get_vals_errs(Ys, normalize=normalize)
-            x = np.arange(len(nom), dtype=np.float64) + 0.5
+            x = np.arange(len(val), dtype=np.float64) + 0.5
             x += xoffset * i  # Offset each dataset for visibility
 
-            if what == 'value':
-                main_artists.append(
-                        ax_main.errorbar(x, nom, xerr=0.5, yerr=err1D, fmt='o',
-                                 label=label)
-                )
-            elif what == 'error':
-                main_artists.append(
-                        ax_main.errorbar(x, err1D, xerr=0.5, fmt='o',
-                                 label=label)
-                )
-            elif what == 'relativeError':
-                main_artists.append(
-                        ax_main.errorbar(x, err1D/nom, xerr=0.5, fmt='o',
-                                 label=label)
-                )
+            nom, err1D = get_vals_errs(val, cov, 
+                                       normalize=normalize,
+                                       what=what)
 
+            main_artists.append(
+                    ax_main.errorbar(x, nom, xerr=0.5, yerr=err1D, fmt='o',
+                             label=label)
+            )
 
-        Ys0 = Ys_l[0]
+        val0 = vals_l[0]
+        cov0 = covs_l[0]
         if cut is not None:
-            Ys0 = binning.get_slice(Ys0.T, **cut).T
+            val0 = binning.get_slice(val0.T, **cut).T
+            cov0 = binning.get_slice(cov0.T, **cut)
+            cov0 = binning.get_slice(cov0.T, **cut)
 
         if calculate_chi2:
             chi2s = []
-        for i, (Ys,artist) in enumerate(zip(Ys_l[1:], main_artists[1:])):
+        for i, (val,cov,artist) in enumerate(zip(vals_l[1:], covs_l[1:], main_artists[1:])):
             if cut is not None:
-                Ys = binning.get_slice(Ys.T, **cut).T
+                val = binning.get_slice(val.T, **cut).T
+                cov = binning.get_slice(cov.T, **cut)
+                cov = binning.get_slice(cov.T, **cut)
 
-            ratio, ratioerr = get_ratio_vals_errs(Ys0, Ys, normalize=normalize, what=what)
+            ratio, ratioerr = get_ratio_vals_errs(val0, val,
+                                                  cov0, cov,
+                                                  normalize=normalize,
+                                                  what=what)
             if calculate_chi2:
                 chi2s.append(
-                    statutil.get_chi2(Ys0, Ys, normalize=normalize)
+                    statutil.get_chi2(val0, val, cov0, cov)[0]
                 )
 
             x = np.arange(len(ratio), dtype=np.float64) + 0.5
             x += xoffset * (i+1)
-            if pulls:
-                ax_ratio.errorbar(x, (ratio-1)/ratioerr, xerr=0.5, yerr=1, fmt='o',
-                                  color=artist[0].get_color(),)
-            else:
-                ax_ratio.errorbar(x, ratio, xerr=0.5, yerr=ratioerr, fmt='o',
-                                  color=artist[0].get_color(),)
+
+            ax_ratio.errorbar(x, ratio, xerr=0.5, yerr=ratioerr, fmt='o',
+                              color=artist[0].get_color(),)
 
         ax_ratio.set_xlabel("Bin")
-        if what == 'value':
+        if what == 'value' or what == 'valuePull':
             if normalize:
                 ax_main.set_ylabel("Normalized Value")
             else:
                 ax_main.set_ylabel("Value")
         elif what == 'error':
             ax_main.set_ylabel("Uncertainty")
+        elif what == 'relativeError':
+            ax_main.set_ylabel("Relative Uncertainty")
 
-        if pulls:
+        if what == 'valuePull':
             ax_ratio.set_ylabel("Pulls")
             ax_ratio.fill_between(
                 ax_ratio.get_xlim(), -1, 1, color='gray', alpha=0.2
             )
-            ax_ratio.axhline(0, color='black', linestyle='--', linewidth=0.5)
+            ax_ratio.axhline(0, color='black', linestyle='--', linewidth=1.)
         else:
             ax_ratio.set_ylabel("Ratio")
-            ax_ratio.axhline(1, color='black', linestyle='--', linewidth=0.5)
+            ax_ratio.axhline(1, color='black', linestyle='--', linewidth=1.)
 
         if logy:
             ax_main.set_yscale('log')
@@ -420,7 +438,7 @@ def compare_1d(Ys_l, label_l, normalize=False, isCMS=True, isData=False,
                          transform=ax_main.transAxes,
                          bbox=dict(facecolor='white', alpha=0.5))
         if calculate_chi2:
-            chi2text = 'Chi2 (%d bins):\n'%(Ys0.shape[1])
+            chi2text = 'Chi2 (%d bins):\n'%(val0.shape[0])
             for chi2, label in zip(chi2s, label_l[1:]):
                 chi2text += '%s: %.5g\n' % (label, chi2)
             chi2text = chi2text[:-1]
@@ -434,12 +452,80 @@ def compare_1d(Ys_l, label_l, normalize=False, isCMS=True, isData=False,
         plt.tight_layout()
 
         if savefig is not None:
-            if pulls:
-                filename = savefig + '_%s_pulls.png' % what
-            else:
-                filename = savefig + '_%s.png' % what
+            filename = savefig + '_%s.png' % what
             wrapped_savefig(filename)
         else:
             plt.show()
     finally:
         plt.close(fig)
+
+def plot_pulls(LOSS, x, invhess, data=False, isCMS=True,
+               savefig=None):
+    fig = plt.figure(figsize=config['Figure_Size'])
+    try:
+        pulls = x[LOSS.nBeta:]
+        pullerr = np.diag(np.sqrt(invhess[LOSS.nBeta:, LOSS.nBeta:]))
+        ax = fig.add_subplot(111)
+
+        if isCMS:
+            hep.cms.label(ax=ax, data=data, label=config['Approval_Text'])
+
+        x = np.arange(len(pulls)) + 0.5
+
+        ax.errorbar(x, pulls, xerr=0.5,
+                    yerr=pullerr, fmt='o', 
+                    label='Pulls', color='black',
+                    ecolor='gray')
+
+        ax.axhline(0, color='red', linestyle='--')
+        ax.fill_between(ax.get_xlim(), -1, 1, color='gray', alpha=0.2)
+        ax.set_xlabel('Nuisance index')
+        ax.set_ylabel('Pulls')
+
+        plt.tight_layout()
+        if savefig is not None:
+            filename = savefig + '_pulls.png'
+            wrapped_savefig(filename)
+        else:
+            plt.show()
+    finally:
+        plt.close(fig)
+
+def plot_named_pulls(res, data=False, isCMS=True,
+               savefig=None):
+    fig = plt.figure(figsize=config['Figure_Size'])
+    try:
+        pulls = res.x[7875:]
+        pullerr = np.diag(np.sqrt(res.invhess[7875:, 7875:]))
+
+        pullidxs = []
+        pullnames = []
+        pullvals = []
+        pullerrs = []
+        for key in res.namedNuisances.keys():
+            pullidxs.append(key)
+            pullnames.append(res.namedNuisances[key])
+            pullvals.append(pulls[key])
+            pullerrs.append(pullerr[key])
+
+        ax = fig.add_subplot(111)
+
+        if isCMS:
+            hep.cms.label(ax=ax, data=data, label=config['Approval_Text'])
+
+        ax.errorbar(np.arange(len(pullvals)), pullvals, yerr=pullerrs, fmt='o', label='Pulls', color='black', ecolor='gray')
+        ax.axhline(0, color='red', linestyle='--')
+        ax.set_xticks(np.arange(len(pullvals)))
+        ax.set_xticklabels(pullnames, rotation=45, ha='right', rotation_mode='anchor')
+        ax.set_ylabel('Pulls')
+
+        plt.tight_layout()
+        if savefig is not None:
+            plt.savefig(savefig, format='png', bbox_inches='tight', dpi=300)
+            plt.clf()
+        else:
+            plt.show()
+    finally:
+        plt.close(fig)
+
+
