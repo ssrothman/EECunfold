@@ -18,7 +18,7 @@ from scipy.stats import multivariate_normal
 
 torch.set_default_dtype(torch.float64)
 
-def get_arrs(histdict, syst, iboot, basebinning, rebinning_path):
+def get_arrs(histdict, syst, iboot, basebinning, rebinning_path, axes_to_project):
     the_cut = {}
     the_tcut = {}
     if iboot is not None:
@@ -58,19 +58,21 @@ def get_arrs(histdict, syst, iboot, basebinning, rebinning_path):
     if rebinning_path is not None:
         import indexing
         print("Rebinning...")
-        reco, _ = basebinning.rebin(reco.T, rebinning_path)
-        recoBkg, _ = basebinning.rebin(recoBkg.T, rebinning_path)
-        gen, _ = basebinning.rebin(gen.T, rebinning_path)
-        genBkg, _ = basebinning.rebin(genBkg.T, rebinning_path)
-        reco = reco.T
-        recoBkg = recoBkg.T
-        gen = gen.T
-        genBkg = genBkg.T
 
         if transfer is not None:
             transfer, _ = basebinning.rebin(transfer, rebinning_path)
             transfer, _ = basebinning.rebin(transfer.T, rebinning_path)
             transfer = transfer.T
+
+        reco, _ = basebinning.rebin(reco.T, rebinning_path)
+        recoBkg, _ = basebinning.rebin(recoBkg.T, rebinning_path)
+        gen, _ = basebinning.rebin(gen.T, rebinning_path)
+        genBkg, basebinning = basebinning.rebin(genBkg.T, rebinning_path)
+        reco = reco.T
+        recoBkg = recoBkg.T
+        gen = gen.T
+        genBkg = genBkg.T
+
         print("after rebinning, shapes are")
         print("\treco: ", reco.shape)
         print("\trecoBkg: ", recoBkg.shape)
@@ -78,6 +80,21 @@ def get_arrs(histdict, syst, iboot, basebinning, rebinning_path):
         print("\tgenBkg: ", genBkg.shape)
         if transfer is not None:
             print("\ttransfer: ", transfer.shape)
+    
+    if axes_to_project is not None:
+        import indexing
+        for ax in axes_to_project:
+            print("projecting out", ax)
+
+            if transfer is not None:
+                transfer = basebinning.project_out(transfer.T, ax)[0]
+                transfer = basebinning.project_out(transfer.T, ax)[0]
+
+            reco = basebinning.project_out(reco.T, ax)[0].T
+            recoBkg = basebinning.project_out(recoBkg.T, ax)[0].T
+            gen = basebinning.project_out(gen.T, ax)[0].T
+            genBkg, basebinning = basebinning.project_out(genBkg.T, ax)
+            genBkg = genBkg.T
 
     if transfer is not None:
         tdenom = gen - genBkg
@@ -99,10 +116,12 @@ def setup_loss(histdict,
                two_sided_systs=[],
                one_sided_systs=[], 
                basebinning=None,
-               rebinning_path=None):
+               rebinning_path=None,
+               axes_to_project=None):
     #nominal
     reco0, gen0, rho0, gamma0, transfer0 = get_arrs(histdict, 'nominal', 0,
-                                                    basebinning, rebinning_path)
+                                                    basebinning, rebinning_path,
+                                                    axes_to_project)
 
     rhoVariations = []
     gammaVariations = []
@@ -117,7 +136,8 @@ def setup_loss(histdict,
 
     print("Building stat templates...")
     _, _, rhoboot, gammaboot, _ = get_arrs(histdict, 'nominal', None,
-                                           basebinning, rebinning_path)
+                                           basebinning, rebinning_path,
+                                           axes_to_project)
     for iboot in tqdm(range(1, Nboot+1)):
         rhoVariations.append((rhoboot[iboot] - rho0)/Nboot)
         gammaVariations.append((gammaboot[iboot] - gamma0)/Nboot)
@@ -126,9 +146,11 @@ def setup_loss(histdict,
     print("Buiding two-sided systs...")
     for syst in tqdm(two_sided_systs):
         _, _, rho_up, gamma_up, transfer_up = get_arrs(histdict, '%sUp'%syst, 0,
-                                                       basebinning, rebinning_path)
+                                                       basebinning, rebinning_path,
+                                                       axes_to_project)
         _, _, rho_dn, gamma_dn, transfer_dn = get_arrs(histdict, '%sDown'%syst, 0,
-                                                       basebinning, rebinning_path)
+                                                       basebinning, rebinning_path,
+                                                       axes_to_project)
         rhoVariations.append(0.5*(rho_up - rho_dn))
         gammaVariations.append(0.5*(gamma_up - gamma_dn))
         transferVariations.append(0.5*(transfer_up - transfer_dn))
@@ -138,7 +160,8 @@ def setup_loss(histdict,
     print("Building one-sided systs...")
     for syst in tqdm(one_sided_systs):
         _, _, rho_up, gamma_up, transfer_up = get_arrs(histdict, syst, 0,
-                                                       basebinning, rebinning_path)
+                                                       basebinning, rebinning_path,
+                                                       axes_to_project)
         rhoVariations.append(rho_up - rho0)
         gammaVariations.append(gamma_up - gamma0)
         transferVariations.append(transfer_up - transfer0)

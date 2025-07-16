@@ -54,14 +54,6 @@ hists = {
     "transfer" : {}
 }
 
-if args.projectAxes is not None:
-    toproj =  ['bootstrap'] + args.projectAxes
-    toproj_t = ['bootstrap']
-    for ax in args.projectAxes:
-        toproj_t.append(ax+'_reco')
-    for ax in args.projectAxes:
-        toproj_t.append(ax+'_gen')
-
 for what in hists.keys():
     print("Loading %s %s"%(what, 'nominal'))
     hists[what]['nominal'] = filenames.get_full_hist(
@@ -82,12 +74,6 @@ for what in hists.keys():
                 "Check your dataset and the number of bootstraps available.")
 
         hists[what]['nominal'] = hists[what]['nominal'][{'bootstrap' : slice(None, args.nboot+1)}]
-
-    if args.projectAxes is not None:
-        if what == 'transfer':
-            hists[what]['nominal'] = hists[what]['nominal'].project(*toproj_t)
-        else:
-            hists[what]['nominal'] = hists[what]['nominal'].project(*toproj)
 
 lowest_nboot = np.inf
 if args.nboot <= 0:
@@ -137,11 +123,25 @@ if args.rebinning is not None:
     MCx0, rebinning = binning.rebin(
             MCx0, rebinning_path
     )
-    rebinning.dump_to_file(os.path.join(outpath, 'Binning.json'))
+
+    thebinning = rebinning
 else:
     rebinning_path = None
-    binning.dump_to_file(os.path.join(outpath, 'Binning.json'))
+    thebinning = binning
 
+if args.projectAxes is not None:
+    axes_to_project = [ax for ax in binning.axis_names if ax not in args.projectAxes]
+    for ax in axes_to_project:
+        print("projecting out", ax)
+        MCx0, thebinning = thebinning.project_out(
+            MCx0.T, ax,
+        )
+        MCx0 = MCx0.T
+        print("\tprojected shape:", MCx0.shape)
+else:
+    axes_to_project = None
+
+thebinning.dump_to_file(os.path.join(outpath, 'Binning.json'))
 ioutil.wrapped_write_np(os.path.join(outpath, 'MCx0.npy'), MCx0.ravel())
 
 wtsysts_to_load = []
@@ -161,18 +161,12 @@ for what in hists.keys():
             hists[what][wtsyst + updnname] = filenames.get_full_hist(
                 args.Tag, args.Sample, args.boot_per_file,
                 args.statN, args.statK, args.firstN,
-                wtsyst + updn, 'nominal', what,
+                'nominal', wtsyst + updn, what,
                 args.reweight, args.r123type,
                 max_nboot=args.nboot,
                 from_bkp=args.oldbinning,
                 silent=True
             )
-
-            if args.projectAxes is not None:
-                if what == 'transfer':
-                    hists[what][wtsyst+updnname] = hists[what][wtsyst+updnname].project(*toproj_t)
-                else:
-                    hists[what][wtsyst+updnname] = hists[what][wtsyst+updnname].project(*toproj)
 
     for objsyst in objsysts_to_load:
         UPDN = [''] if objsyst in args.one_sided else ['_UP', '_DN']
@@ -189,12 +183,6 @@ for what in hists.keys():
                 silent=True
             )
 
-            if args.projectAxes is not None:
-                if what == 'transfer':
-                    hists[what][objsyst+updnname] = hists[what][objsyst+updnname].project(*toproj_t)
-                else:
-                    hists[what][objsyst+updnname] = hists[what][objsyst+updnname].project(*toproj)
-
 import minimizer
 import numpy as np
 import hist
@@ -206,7 +194,8 @@ LOSS = minimizer.setup_loss(hists,
                             two_sided_systs=args.two_sided,
                             one_sided_systs=args.one_sided,
                             basebinning = binning,
-                            rebinning_path = rebinning_path)
+                            rebinning_path = rebinning_path,
+                            axes_to_project=axes_to_project)
 
 LOSS.write_to_disk(outpath)
 

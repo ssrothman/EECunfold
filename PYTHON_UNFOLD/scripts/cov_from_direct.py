@@ -17,6 +17,7 @@ parser.add_argument('--force', action='store_true')
 
 parser.add_argument('--projectAxes', type=str, nargs='*', default=None)
 parser.add_argument('--rebinning', type=str, default=None,)
+parser.add_argument('--oldbinning', action='store_true',)
 
 parser.add_argument('--theaxes', type=str, nargs='*',
                     default=['pt', 'R', 'r', 'c'],
@@ -38,6 +39,8 @@ recofolder = filenames.reco_folder(
     args.projectAxes, args.rebinning,
     args.what
 )
+if args.oldbinning:
+    recofolder += '_oldbinning'
 
 output_path = os.path.join(recofolder, 'COV_DIRECT.npy')
 
@@ -51,40 +54,41 @@ cov = filenames.get_full_hist(
     args.statN, args.statK, args.firstN,
     args.objsyst, args.wtsyst, 'directcov_%s'%args.what,
     args.reweight, args.r123type, 
-    max_nboot=0, from_bkp=False
+    max_nboot=0, from_bkp=args.oldbinning
 )
-
-if args.projectAxes:
-    whichaxes = []
-    for axis in args.projectAxes:
-        if axis not in args.theaxes:
-            raise ValueError(f"Axis '{axis}' not found in theaxes: {args.theaxes}")
-        axisidx = args.theaxes.index(axis)
-        whichaxes.append(axisidx)
-
-    whichaxes += [i+len(args.theaxes) for i in whichaxes]
-    axismask = np.ones(len(args.theaxes) * 2, dtype=bool)
-    axismask[whichaxes] = False
-    sumaxes = np.where(axismask)[0].tolist()
-
-    cov = np.sum(cov, axis=tuple(sumaxes))
 
 halfshape = cov.shape[:len(cov.shape)//2]
 halfsize = np.prod(halfshape)
 cov = cov.reshape(halfsize, halfsize)
 
-if args.rebinning is not None:
+if args.rebinning is not None or args.projectAxes is not None:
     Hreco = filenames.get_full_hist(
         args.Tag, args.Sample, -1, 
         args.statN, args.statK, args.firstN,
         args.objsyst, args.wtsyst, args.what,
         args.reweight, args.r123type, 
-        max_nboot=0, from_bkp=False
+        max_nboot=0, from_bkp=args.oldbinning
     )
     import indexing
     binning = indexing.Binning()
     binning.setup_from_histogram(Hreco[{'bootstrap': 0}])
-    cov, _ = binning.rebin(cov.T, os.path.join('rebinnings', args.rebinning + '.json'))
-    cov, _ = binning.rebin(cov.T, os.path.join('rebinnings', args.rebinning + '.json'))
+    if args.rebinning is not None:
+        print("Rebinning cov")
+        print("\tstarting", cov.shape)
+        cov, _ = binning.rebin(cov.T, os.path.join('rebinnings', args.rebinning + '.json'))
+        print("\thalfway", cov.shape)
+        cov, binning = binning.rebin(cov.T, os.path.join('rebinnings', args.rebinning + '.json'))
+        print("\tending", cov.shape)
+    if args.projectAxes is not None:
+        axes_to_project = [ax for ax in binning.axis_names if ax not in args.projectAxes]
+        for ax in axes_to_project:
+            print("projecting out", ax)
+            cov, _ = binning.project_out(cov.T, ax)
+            cov, binning = binning.project_out(cov.T, ax)
+            print("\tprojected shape:", cov.shape)
 
 ioutil.wrapped_write_np(output_path, cov)
+
+stdev = np.sqrt(np.diag(cov))
+stdev_path = os.path.join(recofolder, 'STDEV_DIRECT.npy')
+ioutil.wrapped_write_np(stdev_path, stdev)

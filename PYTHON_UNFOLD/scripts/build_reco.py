@@ -48,9 +48,6 @@ Hreco = filenames.get_full_hist(
     from_bkp=args.oldbinning,
 )
 
-if args.projectAxes is not None:
-    Hreco = Hreco.project('bootstrap', *args.projectAxes)
-
 if args.nboot >= 0:
     Hreco = Hreco[{'bootstrap' : slice(None, args.nboot+1)}]
 
@@ -84,6 +81,15 @@ if args.rebinning is not None:
     )
     recovalues = recovalues.T
     print("\trebinned shape: ", recovalues.shape)
+if args.projectAxes is not None:
+    axes_to_project = [ax for ax in RecoBinning.axis_names if ax not in args.projectAxes]
+    for ax in axes_to_project:
+        print("projecting out ", ax)
+        recovalues, RecoBinning = RecoBinning.project_out(
+            recovalues.T, ax,
+        )
+        recovalues = recovalues.T
+        print("\tprojected shape: ", recovalues.shape)
 
 ioutil.wrapped_write_np(os.path.join(recofolder, '%s.npy'%capswhat), recovalues[0])
 ioutil.wrapped_write_np(os.path.join(recofolder, '%s_wBOOT.npy'%capswhat), recovalues)
