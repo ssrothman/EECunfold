@@ -6,6 +6,10 @@ parser.add_argument('Rundir', type=str)
 parser.add_argument('--force', action='store_true')
 parser.add_argument('--device', type=str, default=None)
 
+parser.add_argument("--clipLowestN", type=int, default=0)
+parser.add_argument("--forcePositive", action='store_true')
+parser.add_argument("--clip_wrt_corr", action='store_true')
+
 args = parser.parse_args()
 
 if args.device is None:
@@ -43,12 +47,22 @@ if 'frozen_mask' not in configdict:
     print("Warning: no frozen_mask in configdict. Using default (no frozen mask).")
     configdict['frozen_mask'] = None
     configdict['frozen_vals'] = None
+    xfull = res.x
 else:
     configdict['frozen_mask'] = np.asarray(configdict['frozen_mask'])
     configdict['frozen_vals'] = np.asarray(configdict['frozen_vals'])
+    xfull = np.empty((LOSS.nBeta+LOSS.nTheta))
+    xfull[configdict['frozen_mask']] = configdict['frozen_vals']
+    xfull[~configdict['frozen_mask']] = res.x
 
-hess = ioutil.wrapped_read_np(os.path.join(args.Rundir, 'minimization_result', 'HESSIAN.npy'))
-beta = res.x[:LOSS.nBeta]
+eigstr = 'clip%d' % args.clipLowestN
+if args.forcePositive:
+    eigstr += '_forcePos'
+if args.clip_wrt_corr:
+    eigstr += '_clipCorr'
+
+hess = ioutil.wrapped_read_np(os.path.join(args.Rundir, 'minimization_result', 'HESS_EIGINV_%s.npy' % eigstr))
+beta = xfull[:LOSS.nBeta]
 covbeta = hess[:LOSS.nBeta, :LOSS.nBeta]
 
 unf = reco * beta
@@ -57,7 +71,7 @@ covunf = np.diag(reco) @ covbeta @ np.diag(reco)
 ioutil.wrapped_write_np(unfpath, unf)
 ioutil.wrapped_write_np(covunfpath, covunf)
 
-theta = res.x[LOSS.nBeta:]
+theta = xfull[LOSS.nBeta:]
 
 LOSS.torch()
 LOSS.to(args.device)
