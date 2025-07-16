@@ -26,6 +26,31 @@ class BinningBlock:
         self.total_size = 1
         self.offset = 0
 
+    def __eq__(self, other):
+        if not isinstance(other, BinningBlock):
+            return False
+
+        if self.Nax != other.Nax:
+            return False
+
+        if self.total_size != other.total_size:
+            return False
+
+        if self.axis_names != other.axis_names:
+            return False
+
+        for i, ax_name in enumerate(self.axis_names):
+            if ax_name not in other.axis_names:
+                return False
+
+            if self.extents[i] != other.extents[other.axis_names.index(ax_name)]:
+                return False
+
+            if self.ax_details[ax_name]['edges'] != other.ax_details[ax_name]['edges']:
+                return False
+
+        return True
+
     def to_dict(self):
         result = {
             'axis_names': self.axis_names,
@@ -243,6 +268,34 @@ class BinningBlock:
 
         data[indexing, indexing] = values
 
+    def project_out(self, data, axis_name):
+        blockdata = data[self.offset: self.offset + self.total_size]
+        shape = []
+        for i, name in enumerate(self.axis_names):
+            shape.append(self.ax_details[name]['extent'])
+            if name == axis_name:
+                whichax = i
+        extradims = list(data.shape[1:])
+        shape = shape + extradims
+
+        blockdata = blockdata.reshape(shape)
+        result = np.sum(blockdata, axis=whichax, keepdims=False)
+        result = result.reshape((-1, *extradims))
+
+        newblock = BinningBlock()
+        newblock.axis_names = self.axis_names.copy()
+        newblock.axis_names.pop(whichax)
+        newblock.Nax = self.Nax - 1
+        newblock.extents = self.extents.copy()
+        newblock.extents.pop(whichax)
+        newblock.ax_details = self.ax_details.copy()
+        newblock.ax_details.pop(axis_name)
+        newblock.total_size = int(np.prod(newblock.extents))
+        newblock.calculate_strides()
+        newblock.offset = None
+
+        return result, newblock
+
     def value_at(self, data, **indices):
         return data[self.offset+self.flatten_index(**indices)]
 
@@ -406,37 +459,48 @@ class Binning:
             if not block.edges_in_block(**theedges):
                 in_block[i] = False
 
-        if np.sum(in_block) == 0:
-            print("Warning: edges cover multiple blocks. This functionality is experimental.")
-            overlap_block = np.ones(len(self.blocks), dtype=bool)
-            clipped_edges = []
-            for i, block in enumerate(self.blocks):
-                clipped = block.clip_edges_to_block(**theedges)
-                if clipped is None:
-                    overlap_block[i] = False
-                    clipped_edges.append(None)
-                else:
-                    clipped_edges.append(clipped)
-            if np.sum(overlap_block) == 0:
-                raise ValueError("Somehow multiple blocks contain the edges, but also none of them do. This must be a bug")
+        overlap_block = np.ones(len(self.blocks), dtype=bool)
+        clipped_edges = []
+        for i, block in enumerate(self.blocks):
+            clipped = block.clip_edges_to_block(**theedges)
+            if clipped is None:
+                overlap_block[i] = False
+                clipped_edges.append(None)
+            else:
+                clipped_edges.append(clipped)
+        if np.sum(overlap_block) == 0:
+            print("No blocks overlap with the specified edges.")
 
-            result = np.empty((0, *data.shape[1:]), dtype=data.dtype)
-            for i, block in enumerate(self.blocks):
-                if overlap_block[i]:
-                    theslice = block.get_slice_from_edges(data, **clipped_edges[i])
-                    result = np.append(result, theslice, axis=0)
-            return result
+        result = np.empty((0, *data.shape[1:]), dtype=data.dtype)
+        for i, block in enumerate(self.blocks):
+            if overlap_block[i]:
+                theslice = block.get_slice_from_edges(data, **clipped_edges[i])
+                result = np.append(result, theslice, axis=0)
+        return result
 
-        elif np.sum(in_block) > 1:
-            print("Multiple blocks contain the specified edges.")
-            print("Edges:")
-            for name in theedges:
-                print("\t", name, ':', theedges[name])
-            print("Blocks:", np.where(in_block)[0])
-            raise ValueError("Multiple blocks contain the specified edges.")
-        else:
-            whichblock = np.argmax(in_block)
-            return self.blocks[whichblock].get_slice_from_edges(data, **theedges)
+    def project_out(self, data, axis_name):
+        result = np.empty((0, *data.shape[1:]), dtype=data.dtype)
+        newbinning = Binning()
+        newbinning.axis_names = self.axis_names.copy()
+        newbinning.axis_names.remove(axis_name)
+        newbinning.Nax = self.Nax - 1
+
+        running_offset = 0
+        prevblock = None
+        for block in self.blocks:
+            blockdata, newblock = block.project_out(data, axis_name)
+
+            if prevblock is not None and newblock == prevblock:
+                result[-newblock.total_size:] += blockdata
+            else:
+                result = np.append(result, blockdata, axis=0)
+                newblock.offset = running_offset
+                running_offset += newblock.total_size
+                newbinning.blocks.append(newblock)
+    
+            prevblock = newblock
+
+        return result, newbinning
 
     '''
     Rebin data according to a supplied spec
