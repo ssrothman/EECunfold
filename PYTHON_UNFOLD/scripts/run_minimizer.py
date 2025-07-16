@@ -31,6 +31,7 @@ recoerr_group.add_argument('--invcov_boot', type=str, default=None)
 
 recoerr_group.add_argument('--stdev_type1', action='store_true')
 recoerr_group.add_argument('--stdev_type2', action='store_true')
+recoerr_group.add_argument('--stdev_direct', action='store_true',)
 
 x0group = parser.add_mutually_exclusive_group(required=True)
 x0group.add_argument('--x0fromfile', type=str, default=None)
@@ -144,8 +145,11 @@ elif args.stdev_type1:
 elif args.stdev_type2:
     recoerrpath = os.path.join(reco_folder, 'ERR2D.npy')
     recoerr_mode_str = 'stdev_type2'
+elif args.stdev_direct:
+    recoerrpath = os.path.join(reco_folder, 'STDEV_DIRECT.npy')
+    recoerr_mode_str = 'stdev_direct'
 else:
-    raise ValueError("Couldn't determine recoerr type. Use --invcov_boot --invcov_normed, --invcov_direct, --stdev_type1, or --stdev_type2.")
+    raise ValueError("Couldn't determine recoerr type. Use --invcov_boot --invcov_normed, --invcov_direct, --stdev_type1, or --stdev_type2 or --stdev_direct.")
 recoerr = ioutil.wrapped_read_np(recoerrpath)
 
 if args.x0fromfile is not None:
