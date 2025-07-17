@@ -95,34 +95,86 @@ def get_ratio_vals_errs(vals_num, vals_denom,
 
     return ratio, err1D
 
-def plot_transfer_2d(LOSS, isCMS=True, savefig=None):
+def plot_transfer_2d(LOSS, isCMS=True, savefig=None, variation=None, logz=False):
     fig = plt.figure(figsize=config['Figure_Size'])
     try:
         ax = fig.add_subplot(111)
         if isCMS:
             hep.cms.label(ax=ax, data=False, label=config['Approval_Text'])
-        q = ax.pcolormesh(LOSS.transfer0, cmap='Reds')
+
+        if variation is None:
+            T = LOSS.transfer0
+            name = 'nominal'
+            cmap = 'Reds'
+            if logz:
+                norm = LogNorm()
+            else:
+                norm = Normalize()
+        else:
+            print("taking variation", variation)
+            if str(variation) in LOSS.namedNuisances:
+                name = LOSS.namedNuisances[str(variation)]
+                print("Variation name:", name)
+            else:
+                name = 'Variation %s' % variation
+
+            T = LOSS.transferVariations[variation] / LOSS.transfer0
+            if logz:
+                T = np.abs(T)
+                norm = LogNorm()
+                cmap = 'Reds'
+            else:
+                cmap = 'coolwarm'
+                #maxval = np.nanmax(np.abs(T)[np.isfinite(T)])
+                maxval = 0.1
+                print(maxval)
+                norm = Normalize(vmin=-maxval, vmax=maxval)
+
+        q = ax.pcolormesh(T, cmap=cmap, norm=norm)
         fig.colorbar(q, ax=ax, pad=0.01)
         ax.set_xlabel("Gen")
         ax.set_ylabel("Reco")
 
+        ax.text(0.05, 0.95, name,
+                transform=ax.transAxes, fontsize=46,
+                bbox=dict(facecolor='white', alpha=0.5),
+                verticalalignment='top', horizontalalignment='left')
+
         plt.tight_layout()
 
         if savefig is not None:
-            filename = savefig + '_transfer.png'
+            if logz:
+                savefig += '_logz'
+            if variation is not None:
+                filename = savefig + '_transfer_variation%s.png' % variation
+            else:
+                filename = savefig + '_transfer.png'
             wrapped_savefig(filename)
         else:
             plt.show()
     finally:
         plt.close(fig)
 
-def plot_transfer_scale(LOSS, isCMS=True, savefig=None, binning=None, cut=None):
+def plot_transfer_scale(LOSS, isCMS=True, savefig=None, binning=None, cut=None, variation=None):
     fig = plt.figure(figsize=config['Figure_Size'])
     try:
         ax = fig.add_subplot(111)
         if isCMS:
             hep.cms.label(ax=ax, data=False, label=config['Approval_Text'])
-        scale = np.sum(LOSS.transfer0, axis=0)
+
+        if variation is not None:
+            if str(variation) in LOSS.namedNuisances:
+                name = LOSS.namedNuisances[str(variation)]
+            else:
+                name = 'Variation %s' % variation
+            print("Taking variation", variation, "with name", name)
+            T = LOSS.transferVariations[variation]
+        else:
+            print("Taking nominal transfer")
+            T = LOSS.transfer0
+            name = 'nominal'
+
+        scale = np.sum(T, axis=0)
 
         if cut is not None:
             scale = binning.get_slice(scale.T, **cut).T
@@ -136,6 +188,11 @@ def plot_transfer_scale(LOSS, isCMS=True, savefig=None, binning=None, cut=None):
         ax.set_xlabel("Gen Bin")
         ax.set_ylabel("Transfer scale factor")
 
+        ax.text(0.05, 0.95, name,
+                transform=ax.transAxes, fontsize=46,
+                bbox=dict(facecolor='white', alpha=0.5),
+                verticalalignment='top', horizontalalignment='left')
+
         if cut is not None:
             ax.text(0.05, 0.05, labeltext,
                     transform=ax.transAxes, fontsize=46,
@@ -144,14 +201,17 @@ def plot_transfer_scale(LOSS, isCMS=True, savefig=None, binning=None, cut=None):
         plt.tight_layout()
 
         if savefig is not None:
-            filename = savefig + '_transfer_scale.png'
+            if variation is not None:
+                filename = savefig + '%s_transfer_scale_variation%s.png'%(cut, variation)
+            else:
+                filename = savefig + '_transfer_scale.png'
             wrapped_savefig(filename)
         else:
             plt.show()
     finally:
         plt.close(fig)
 
-def plot_bkg_templates(LOSS, isCMS=True, savefig=None, binning=None, cut=None):
+def plot_bkg_templates(LOSS, isCMS=True, savefig=None, binning=None, cut=None, variation=None):
     if cut is not None and binning is None:
         raise ValueError("If 'cut' is provided, 'binning' must also be provided.")
 
@@ -161,8 +221,19 @@ def plot_bkg_templates(LOSS, isCMS=True, savefig=None, binning=None, cut=None):
         if isCMS:
             hep.cms.label(ax=ax, data=False, label=config['Approval_Text'])
 
-        R0 = LOSS.rho0
-        G0 = LOSS.gamma0
+        if variation is not None:
+            if str(variation) in LOSS.namedNuisances:
+                name = LOSS.namedNuisances[str(variation)]
+            else:
+                name = 'Variation %s' % variation
+            print("Taking variation", variation, "with name", name)
+            R0 = LOSS.rhoVariations[variation]
+            G0 = LOSS.gammaVariations[variation]
+        else:
+            print("Taking nominal background templates")
+            R0 = LOSS.rho0
+            G0 = LOSS.gamma0
+            name = 'nominal'
     
         if cut is not None:
             R0 = binning.get_slice(R0.T, **cut).T
@@ -183,6 +254,11 @@ def plot_bkg_templates(LOSS, isCMS=True, savefig=None, binning=None, cut=None):
         ax.errorbar(x, R0, xerr=0.5, fmt='o', label='Reco')
         ax.errorbar(x, G0, xerr=0.5, fmt='o', label='Gen')
 
+        ax.text(0.05, 0.95, name,
+                transform=ax.transAxes, fontsize=46,
+                bbox=dict(facecolor='white', alpha=0.5),
+                verticalalignment='top', horizontalalignment='left')
+
         if labeltext is not None:
             ax.text(0.05, 0.05, labeltext,
                     transform=ax.transAxes, fontsize=46,
@@ -194,7 +270,11 @@ def plot_bkg_templates(LOSS, isCMS=True, savefig=None, binning=None, cut=None):
         plt.tight_layout()
 
         if savefig is not None:
-            filename = savefig + '%s_bkg_templates.png'%fnametext
+            if variation is not None:
+                filename = savefig + '%s_bkg_templates_variation%s.png'%(fnametext, variation)
+            else:
+                filename = savefig + '%s_bkg_templates.png'%fnametext
+
             wrapped_savefig(filename)
         else:
             plt.show()
@@ -255,6 +335,7 @@ def plot_purity_stability(LOSS, isCMS=True, savefig=None, binning=None, cut=None
         plt.close(fig)
 
 def plot_cov_2d(cov, isCMS=True, data=False, correl=True,
+                ticklabels=None,
                 logz=False, savefig=None):
     fig = plt.figure(figsize=config['Figure_Size'])
     try:
@@ -282,8 +363,15 @@ def plot_cov_2d(cov, isCMS=True, data=False, correl=True,
                 q = ax.pcolormesh(cov, cmap='coolwarm', vmin=-r, vmax=r)
                 fig.colorbar(q, ax=ax, pad=0.01, label='Covariance')
 
-        ax.set_xlabel("Bin")
-        ax.set_ylabel("Bin")
+        if ticklabels is not None:
+            ax.set_xticks(np.arange(len(ticklabels)) + 0.5)
+            ax.set_xticklabels(ticklabels, rotation=45, ha='right', rotation_mode='anchor')
+            ax.set_yticks(np.arange(len(ticklabels)) + 0.5)
+            ax.set_yticklabels(ticklabels, rotation=45, ha='right', rotation_mode='anchor')
+        else:
+            ax.set_xlabel("Bin")
+            ax.set_ylabel("Bin")
+
         plt.tight_layout()
 
         if savefig is not None:
@@ -460,7 +548,7 @@ def compare_1d(vals_l, covs_l, label_l,
         plt.close(fig)
 
 def plot_pulls(LOSS, x, invhess, data=False, isCMS=True,
-               savefig=None):
+               savefig=None, names=False):
     fig = plt.figure(figsize=config['Figure_Size'])
     try:
         pulls = x[LOSS.nBeta:]
@@ -477,9 +565,20 @@ def plot_pulls(LOSS, x, invhess, data=False, isCMS=True,
                     label='Pulls', color='black',
                     ecolor='gray')
 
+        if names:
+            names = []
+            for i in range(len(pulls)):
+                if str(i) in LOSS.namedNuisances:
+                    names.append(LOSS.namedNuisances[str(i)])
+                else:
+                    names.append('Nuisance %d' % i)
+            ax.set_xticks(x)
+            ax.set_xticklabels(names, rotation=45, ha='right', rotation_mode='anchor')
+        else:
+            ax.set_xlabel('Nuisance index')
+
         ax.axhline(0, color='red', linestyle='--')
         ax.fill_between(ax.get_xlim(), -1, 1, color='gray', alpha=0.2)
-        ax.set_xlabel('Nuisance index')
         ax.set_ylabel('Pulls')
 
         plt.tight_layout()
@@ -491,41 +590,47 @@ def plot_pulls(LOSS, x, invhess, data=False, isCMS=True,
     finally:
         plt.close(fig)
 
-def plot_named_pulls(res, data=False, isCMS=True,
-               savefig=None):
-    fig = plt.figure(figsize=config['Figure_Size'])
-    try:
-        pulls = res.x[7875:]
-        pullerr = np.diag(np.sqrt(res.invhess[7875:, 7875:]))
+def plot_impact(LOSS, x, invhess, whichnuisance,
+                normalize=False, what='value', 
+                isCMS=True, isData=False,
+                logy=True, xoffset=0.1, 
+                binning=None, cut=None,
+                savefig=None, calculate_chi2=False):
 
-        pullidxs = []
-        pullnames = []
-        pullvals = []
-        pullerrs = []
-        for key in res.namedNuisances.keys():
-            pullidxs.append(key)
-            pullnames.append(res.namedNuisances[key])
-            pullvals.append(pulls[key])
-            pullerrs.append(pullerr[key])
+    if str(whichnuisance) in LOSS.namedNuisances:
+        nuisance_name = LOSS.namedNuisances[str(whichnuisance)]
+    else:
+        nuisance_name = 'Nuisance %s' % whichnuisance
 
-        ax = fig.add_subplot(111)
+    print("Plotting impacts for nuisance:", nuisance_name)
 
-        if isCMS:
-            hep.cms.label(ax=ax, data=data, label=config['Approval_Text'])
+    _, _, xC, HC = statutil.nuisance_impact(x, invhess, LOSS.nBeta + whichnuisance)
 
-        ax.errorbar(np.arange(len(pullvals)), pullvals, yerr=pullerrs, fmt='o', label='Pulls', color='black', ecolor='gray')
-        ax.axhline(0, color='red', linestyle='--')
-        ax.set_xticks(np.arange(len(pullvals)))
-        ax.set_xticklabels(pullnames, rotation=45, ha='right', rotation_mode='anchor')
-        ax.set_ylabel('Pulls')
+    compare_1d([x[:LOSS.nBeta], xC[:LOSS.nBeta]], 
+               [invhess[:LOSS.nBeta, :LOSS.nBeta], 
+                HC[:LOSS.nBeta, :LOSS.nBeta]], 
+               ['With %s' % nuisance_name, 
+                'Without %s' % nuisance_name],
+               normalize=normalize, what=what,
+               isCMS=isCMS, isData=isData,
+               logy=logy, xoffset=xoffset,
+               binning=binning, cut=cut,
+               savefig=savefig, calculate_chi2=calculate_chi2)
 
-        plt.tight_layout()
-        if savefig is not None:
-            plt.savefig(savefig, format='png', bbox_inches='tight', dpi=300)
-            plt.clf()
+def plot_pull_correlations(LOSS, x, invhess, isCMS=True, data=False, correl=True,
+                           logz=False, savefig=None):
+
+    C = invhess[LOSS.nBeta:, LOSS.nBeta:]
+    names = []
+    for i in range(C.shape[0]):
+        if str(i) in LOSS.namedNuisances:
+            names.append(LOSS.namedNuisances[str(i)])
         else:
-            plt.show()
-    finally:
-        plt.close(fig)
+            names.append('Nuisance %d' % i)
 
 
+    if savefig is not None:
+        savefig += '_pull_correlations'
+
+    plot_cov_2d(C, isCMS=isCMS, data=data, correl=correl,
+                ticklabels=names, logz=logz, savefig=savefig)
