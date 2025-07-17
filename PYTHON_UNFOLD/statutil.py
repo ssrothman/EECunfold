@@ -66,10 +66,65 @@ def condition(x, invhess, slice_start, slice_end, values):
     newhess = H11 - H12 @ solved
     return newx, newhess
 
+def nuisance_impact(x, invhess, whichnuisance):
+    xmask = np.ones(invhess.shape[0], dtype=bool)
+    xmask[whichnuisance] = False
+    x1 = x[xmask]
+    x2 = x[whichnuisance]
+
+    H11mask = np.ones(invhess.shape[0], dtype=bool)
+    H11mask[whichnuisance] = False
+    H11 = invhess[H11mask, :][:, H11mask]
+
+    H22 = invhess[whichnuisance, whichnuisance]
+
+    H12 = invhess[whichnuisance, :]
+    H12mask = np.ones(invhess.shape[0], dtype=bool)
+    H12mask[whichnuisance] = False
+    H12 = H12[H12mask]
+
+    H21 = invhess[:, whichnuisance]
+    H21mask = np.ones(invhess.shape[0], dtype=bool)
+    H21mask[whichnuisance] = False
+    H21 = H21[H21mask]
+
+    H12 = H12[:, None]
+    H21 = H21[None, :]
+
+    xshift = np.squeeze((1/H22) * H12 * x2)
+    
+    H11shift = - (1/H22) * H12 @ H21
+
+    return xshift, H11shift, x1 + xshift, H11 + H11shift
+
 def multivariate_gaussian_rvs(mu, L, Nsamples):
     standard_normal = np.random.normal(size=(mu.shape[0], Nsamples))
 
     return (mu[:, None] + L @ standard_normal).T
+
+def regularized_inverse(matrix, l, force_positive=True, wrt_corr=True):
+    if wrt_corr:
+        err = np.sqrt(np.diag(matrix))
+        err[err == 0] = 1
+        inverr = 1 / err
+        C = np.diag(inverr) @ matrix @ np.diag(inverr)
+    else:
+        C = matrix
+
+    regmat = np.where(C < l, 0, C)
+
+    _, inverse, _ = inverse_and_eigenspectrum(
+        regmat, 
+        clip_lowest_N=0,
+        force_positive=False,
+        return_sqrt=False,
+        wrt_corr=wrt_corr
+    )
+
+    if wrt_corr:
+        inverse = np.diag(inverr) @ inverse @ np.diag(inverr)
+
+    return inverse
 
 def inverse_and_eigenspectrum(matrix, 
                               clip_lowest_N=0,
