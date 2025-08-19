@@ -1,6 +1,7 @@
 import argparse
 
 parser = argparse.ArgumentParser(description='Run the minimizer for EEC reconstruction')
+parser.add_argument('Skimmer', type=str)
 parser.add_argument('RecoTag', type=str)
 parser.add_argument('RecoSample', type=str)
 parser.add_argument('--reco_nboot', type=int, default=-1)
@@ -18,10 +19,21 @@ parser.add_argument('--gen_statK', type=int, default=-1)
 parser.add_argument('--gen_firstN', type=int, default=-1)
 
 parser.add_argument('--systlist', type=str, nargs='*',
-                    default=['scale', 'isosf', 'idsf', 'triggersf',
-                             'PU', 'PDF', 'aS', 'PDFaS',
-                             'ISR', 'FSR',
-                             'CH', 'JES', 'JER', 'UNCLUSTERED',
+                    default=['scale', 
+                             #'isosf', 
+                             #'idsf', 
+                             #'triggersf',
+                             'PU', 
+                             #'prefire',
+                             #'PDF', 
+                             #'aS', 
+                             'PDFaS',
+                             'ISR', 
+                             'FSR',
+                             'CH', 
+                             'JES', 
+                             'JER', 
+                             'UNCLUSTERED',
                              'TRK_EFF'])
 
 recoerr_group = parser.add_mutually_exclusive_group(required=True)
@@ -46,7 +58,8 @@ parser.add_argument('--method_kwargs', type=str, nargs='*', default=[])
 parser.add_argument("--checkpoint_interval", type=int, default=50)
 
 parser.add_argument('--projectAxes', type=str, nargs='*', default=None,)
-parser.add_argument('--rebinning', type=str, default=None)
+parser.add_argument('--rebinning_reco', type=str, default=None)
+parser.add_argument('--rebinning_gen', type=str, default=None)
 
 parser.add_argument('--smoothed', action='store_true')
 
@@ -56,6 +69,10 @@ parser.add_argument('--oldbinning', action='store_true',)
 
 freezegroup = parser.add_mutually_exclusive_group(required=False)
 freezegroup.add_argument('--freezeAllNuisances', action='store_true')
+
+parser.add_argument('--compute_hessian', action='store_true',)
+parser.add_argument('--invert_hessian', action='store_true',)
+parser.add_argument('--setup_unfolded', action='store_true',)
 
 args = parser.parse_args()
 
@@ -98,16 +115,19 @@ import numpy as np
 import ioutil
 
 reco_folder = filenames.reco_folder(
-    args.RecoTag, args.RecoSample, args.reco_nboot,
+    args.RecoTag, args.RecoSample, args.Skimmer,
+    args.reco_nboot,
     args.reco_statN, args.reco_statK, args.reco_firstN,
     args.reco_objsyst, args.reco_wtsyst, 
-    args.projectAxes, args.rebinning, 'reco',
+    args.projectAxes, args.rebinning_reco, 'reco',
 )
 loss_folder = filenames.loss_folder(
-    args.GenTag, args.GenSample, args.gen_nboot,
+    args.GenTag, args.GenSample, args.Skimmer,
+    args.gen_nboot,
     args.gen_statN, args.gen_statK, args.gen_firstN,
     args.systlist, 
-    args.projectAxes, args.rebinning,
+    args.projectAxes,
+    args.rebinning_gen, args.rebinning_reco,
     args.smoothed
 )
 if args.oldbinning:
@@ -227,15 +247,10 @@ if args.rescale:
     else:
         recoerr = recoerr / sigma
         
-    A = np.einsum('i,j->ij', 1/sigma, reco*sigma)
+    A = np.einsum('i,j->ij', 1/sigma, MCgen*sigma)
     LOSS.transfer0 *= A
     for i in range(LOSS.transferVariations.shape[0]):
         LOSS.transferVariations[i] *= A
-
-    puregen = (1 - LOSS.gamma0) * x0
-    purereco = LOSS.transfer0 @ puregen
-    pred = (1 + LOSS.rho0) * purereco
-
 
 res = minimizer.run_minimization(LOSS, reco, recoerr, 
                                  run2d = args.run2d,
@@ -261,3 +276,25 @@ if args.rescale:
     res = (res, reco, recoerr, x0)
 
 minimizer.write_minimization_result(*res, destination=os.path.join(resultfolder, 'minimization_result'))
+
+if args.compute_hessian:
+    import subprocess
+    command = [
+        'python', 'scripts/compute_hessian.py',
+        resultfolder
+    ]
+    subprocess.run(command, check=True)
+if args.invert_hessian:
+    import subprocess
+    command = [
+        'python', 'scripts/invert_Hessian.py', 
+        resultfolder
+    ]
+    subprocess.run(command, check=True)
+if args.setup_unfolded:
+    import subprocess
+    command = [
+        'python', 'scripts/setup_unfolded_distribution.py',
+        resultfolder,
+    ]
+    subprocess.run(command, check=True)

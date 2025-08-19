@@ -18,14 +18,25 @@ parser.add_argument('--gen_statK', type=int, default=-1)
 parser.add_argument('--gen_firstN', type=int, default=-1)
 
 parser.add_argument('--systlist', type=str, nargs='*',
-                    default=['scale', 'isosf', 'idsf', 'triggersf',
-                             'PU', 'PDF', 'aS', 'PDFaS',
-                             'ISR', 'FSR',
-                             'CH', 'JES', 'JER', 'UNCLUSTERED',
+                    default=['scale', 
+                             #'isosf', 
+                             #'idsf', 
+                             #'triggersf',
+                             'PU', 
+                             #'PDF', 
+                             #'aS', 
+                             'PDFaS',
+                             'ISR', 
+                             'FSR',
+                             'CH', 
+                             'JES',
+                             'JER', 
+                             'UNCLUSTERED',
                              'TRK_EFF'])
 
 parser.add_argument('--projectAxes', type=str, nargs='*', default=None,)
-parser.add_argument('--rebinning', type=str, default=None)
+parser.add_argument('--rebinning_gen', type=str, default=None)
+parser.add_argument('--rebinning_reco', type=str, default=None)
 
 parser.add_argument('--smoothed', action='store_true',)
 
@@ -41,13 +52,14 @@ reco_folder = filenames.reco_folder(
     args.RecoTag, args.RecoSample, args.reco_nboot,
     args.reco_statN, args.reco_statK, args.reco_firstN,
     args.reco_objsyst, args.reco_wtsyst, 
-    args.projectAxes, args.rebinning, 'reco',
+    args.projectAxes, args.rebinning_reco, 'reco',
 )
 loss_folder = filenames.loss_folder(
     args.GenTag, args.GenSample, args.gen_nboot,
     args.gen_statN, args.gen_statK, args.gen_firstN,
     args.systlist,
-    args.projectAxes, args.rebinning,
+    args.projectAxes,
+    args.rebinning_gen, args.rebinning_reco,
     args.smoothed
 )
 loss_name = os.path.basename(loss_folder)

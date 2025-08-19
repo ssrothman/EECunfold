@@ -10,6 +10,8 @@ except ImportError:
 import numpy as np
 import torch
 import ioutil
+import statutil
+import indexing
 
 def map_to_indices(start, offset, maxval):
     result = start + offset
@@ -226,7 +228,8 @@ class FullLoss:
               transferVarIndices,
               gamma0, gammaVariations,
               rho0, rhoVariations,
-              namedNuisances=None):
+              genBaseline, baselineRecoFlux,
+              namedNuisances, binning):
 
         self.transfer0 = transfer0
         self.gamma0 = gamma0
@@ -238,10 +241,15 @@ class FullLoss:
         self.gammaVariations = gammaVariations
         self.rhoVariations = rhoVariations
 
+        self.genBaseline = np.where(genBaseline == 0, 1e-8, genBaseline)
+        self.baselineRecoFlux = baselineRecoFlux
+
         self.arrays = ['transfer0', 'gamma0', 'rho0', 
                        'transferVariations',
                        'transferVarIndices',
                        'gammaVariations',
+                       'genBaseline',
+                       'baselineRecoFlux',
                        'rhoVariations']
 
         self.nTheta = gammaVariations.shape[0]
@@ -255,6 +263,7 @@ class FullLoss:
             raise ValueError("G, R to have same number of variations")
 
         self.namedNuisances = namedNuisances
+        self.binning = binning
 
         print("nBeta:", self.nBeta)
         print("nTheta:", self.nTheta)
@@ -298,6 +307,8 @@ class FullLoss:
                 'namedNuisances': self.namedNuisances
             })
 
+        self.binning.dump_to_file(os.path.join(path, 'binning.json'))
+
     def read_from_disk(self, path):
         import os.path
 
@@ -311,6 +322,9 @@ class FullLoss:
 
         for name in self.arrays:
             setattr(self, name, ioutil.wrapped_read_np(os.path.join(path, f"{name}.npy")))
+
+        self.binning = indexing.GenRecoBinning()
+        self.binning.load_from_file(os.path.join(path, 'binning.json'))
 
     def set_1d(self):
         self.covmatrix = False
@@ -361,9 +375,7 @@ class FullLoss:
         print("beta0 shape:", beta0.shape)
         print("\tsum:", beta0.sum())
 
-        denom = np.where(reco == 0, 1, reco)
-        x0 = beta0 / denom
-        x0[reco == 0] = 1
+        x0 = beta0 / (self.genBaseline * (reco.sum() / self.baselineRecoFlux))
         print("x0 shape:", x0.shape)
         print("\tsum:", x0.sum())
 
@@ -398,6 +410,7 @@ class FullLoss:
         return self.forward(self.get_beta(x), self.get_theta(x))
 
     def loss(self, x, reco, recoErr):
+        #print("CALLING LOSS")
         beta = x[:self.nBeta]
         theta = x[self.nBeta:]
 
@@ -406,9 +419,12 @@ class FullLoss:
         beta = torch.where(beta<0, 0, beta)
 
         if self.rescaled:
+            #print("SUM(beta) =", beta.sum())
             fwd = self.forward(beta, theta)
         else:
-            fwd = self.forward(beta*reco, theta)
+            #print("SUM(beta) =", (beta*self.genBaseline*reco.sum()/self.baselineRecoFlux).sum())
+
+            fwd = self.forward(beta*self.genBaseline*reco.sum()/self.baselineRecoFlux, theta)
 
         diff = fwd-reco
 
@@ -438,17 +454,57 @@ class FullLoss:
                            frozen_mask=None,
                            frozen_vals=None):
 
-        if type(reco) is not torch.Tensor:
-            reco = torch.from_numpy(reco)
-        if type(recoErr) is not torch.Tensor:
-            recoErr = torch.from_numpy(reco)
-
-        reco = reco.to(self.transfer0.device)
-        recoErr = recoErr.to(self.transfer0.device)
-
         return lambda x: self.loss_with_frozen(x, reco, recoErr,
                                                frozen_mask,
                                                frozen_vals)
+
+    def loss_from_fluxes_shapes(self, fluxes, shapes, fluxbinning, 
+                                theta,
+                                reco, recoErr,
+                                frozen_mask=None,
+                                frozen_vals=None):
+        raise ValueError("Don't use this, it doesn't work! :(")
+
+        if not self.rescaled:
+            raise ValueError("need to set rescaled flag = True")
+
+        fluxes2 = fluxes.clone()
+        shapes2 = shapes.clone()
+
+        axisblocks = self.binning.genbinning.get_blocks(
+            fluxbinning.axis_names
+        )
+
+        starts = []
+        lengths = []
+        for i, block in enumerate(axisblocks):
+            idx = block['slice']
+            if type(idx) is not slice:
+                raise ValueError("Expected slice, got %s" % type(idx))
+            starts.append(idx.start)
+            lengths.append(idx.stop - idx.start)
+
+        starts = torch.tensor(starts, dtype=torch.int32, device=fluxes2.device)
+        lengths = torch.tensor(lengths, dtype=torch.int32, device=fluxes2.device)
+        order = torch.argsort(starts)
+        
+        indices = torch.repeat_interleave(
+            order, lengths[order],
+            dim=0, output_size=shapes2.shape[0]
+        )
+        sumshapes = torch.zeros_like(fluxes)
+        sumshapes.scatter_add_(0, indices, shapes2)
+
+        shapes2 /= sumshapes[indices]
+        fluxes2 *= sumshapes
+
+        beta = self.binning.genbinning.merge_fluxes_shapes(
+            fluxes2, shapes2, fluxbinning
+        )
+        x = torch.concatenate((beta, theta))
+        return self.loss_with_frozen(x, reco, recoErr,
+                                     frozen_mask,
+                                     frozen_vals)
 
     def get_beta(self, x):
         return x[:self.nBeta]

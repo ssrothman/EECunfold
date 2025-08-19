@@ -7,8 +7,8 @@ parser.add_argument('--force', action='store_true')
 parser.add_argument('--device', type=str, default=None)
 
 parser.add_argument("--clipLowestN", type=int, default=0)
-parser.add_argument("--forcePositive", action='store_true')
-parser.add_argument("--clip_wrt_corr", action='store_true')
+parser.add_argument("--dontForcePositive", action='store_true')
+parser.add_argument("--dont_clip_wrt_corr", action='store_true')
 
 args = parser.parse_args()
 
@@ -22,12 +22,16 @@ if args.device is None:
 import os
 
 unfpath = os.path.join(args.Rundir, 'minimization_result', 'UNFOLDED.npy')
+unfsystpath = os.path.join(args.Rundir, 'minimization_result', 'UNFOLDED_SYST.npy')
 covunfpath = os.path.join(args.Rundir,'minimization_result', 'COV_UNFOLDED.npy')
+covunfsystpath = os.path.join(args.Rundir, 'minimization_result', 'COV_UNFOLDED_SYST.npy')
 
 fwdpath = os.path.join(args.Rundir,'minimization_result', 'FORWARD.npy')
 
-if os.path.exists(unfpath) and os.path.exists(covunfpath) and os.path.exists(fwdpath) and not args.force:
-    print(f"Files {unfpath}, {covunfpath}, {fwdpath} already exist. Use --force to overwrite.")
+if os.path.exists(unfpath) and os.path.exists(covunfpath) and \
+        os.path.exists(fwdpath) and os.path.exists(covunfsystpath) and \
+        os.path.exists(unfsystpath) and not args.force:
+    print(f"Files {unfpath}, {covunfpath}, {fwdpath}, and {covunfsystpath} already exist. Use --force to overwrite.")
     import sys
     sys.exit(0)
 
@@ -56,20 +60,27 @@ else:
     xfull[~configdict['frozen_mask']] = res.x
 
 eigstr = 'clip%d' % args.clipLowestN
-if args.forcePositive:
+if not args.dontForcePositive:
     eigstr += '_forcePos'
-if args.clip_wrt_corr:
+if not args.dont_clip_wrt_corr:
     eigstr += '_clipCorr'
 
-hess = ioutil.wrapped_read_np(os.path.join(args.Rundir, 'minimization_result', 'HESS_EIGINV_%s.npy' % eigstr))
+invhess = ioutil.wrapped_read_np(os.path.join(args.Rundir, 'minimization_result', 'HESS_EIGINV_%s.npy' % eigstr))
 beta = xfull[:LOSS.nBeta]
-covbeta = hess[:LOSS.nBeta, :LOSS.nBeta]
+covbeta = invhess[:LOSS.nBeta, :LOSS.nBeta]
 
-unf = reco * beta
-covunf = np.diag(reco) @ covbeta @ np.diag(reco)
+factor = LOSS.genBaseline * reco.sum() / LOSS.baselineRecoFlux
+
+unf = beta * factor
+covunf = np.diag(factor) @ covbeta @ np.diag(factor)
+
+scalefactor = np.ones(LOSS.nBeta + LOSS.nTheta)
+scalefactor[:LOSS.nBeta] = factor
+covunfsyst = np.diag(scalefactor) @ invhess @ np.diag(scalefactor)
 
 ioutil.wrapped_write_np(unfpath, unf)
 ioutil.wrapped_write_np(covunfpath, covunf)
+ioutil.wrapped_write_np(covunfsystpath, covunfsyst)
 
 theta = xfull[LOSS.nBeta:]
 
@@ -83,3 +94,5 @@ fwd = LOSS.forward(unf, theta)
 fwd = fwd.cpu().numpy()
 
 ioutil.wrapped_write_np(fwdpath, fwd)
+
+ioutil.wrapped_write_np(unfsystpath, theta.cpu().detach().numpy())

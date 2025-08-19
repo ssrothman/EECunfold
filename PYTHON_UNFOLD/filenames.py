@@ -3,9 +3,13 @@ import re
 import os
 import numpy as np
 
-def get_hist_paths(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, what,
-                   reweight=None, r123type='Philox', from_bkp=True, silent=False):
-    basepath = os.path.join(datasets.basedir, tag, sample, 'EECres4tee')
+def get_hist_paths(tag, sample, skimmer,
+                   nboot, statN, statK, firstN, 
+                   objsyst, wtsyst, what,
+                   reweight=None, r123type='Philox', 
+                   from_bkp=True, silent=False):
+
+    basepath = os.path.join(datasets.basedir, tag, sample, skimmer)
     histpath_options = os.scandir(basepath)
     histpath_options = list(filter(
         lambda x: x.is_dir() and x.name.startswith(f'hists'),
@@ -102,7 +106,7 @@ def get_hist_paths(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, wh
 
     return nominal_options[0], extraboot_options, total_nboot
 
-def get_full_hist(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, what, 
+def get_full_hist(tag, sample, skimmer, nboot, statN, statK, firstN, objsyst, wtsyst, what, 
                   reweight=None, r123type=None, max_nboot=-1, 
                   from_bkp=True, silent=False):
     if nboot < 0:
@@ -110,7 +114,7 @@ def get_full_hist(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, wha
             print("passed nboot < 0: disambiguating...")
 
         nom, extraboot_options, _ = get_hist_paths(
-            tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, what,
+            tag, sample, skimmer, nboot, statN, statK, firstN, objsyst, wtsyst, what,
             reweight, r123type, from_bkp,
             silent=silent
         )
@@ -145,7 +149,7 @@ def get_full_hist(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, wha
                 nboot = 0
 
     nominal_path, extraboot_options, total_nboot = get_hist_paths(
-        tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, what,
+        tag, sample, skimmer, nboot, statN, statK, firstN, objsyst, wtsyst, what,
         reweight, r123type, from_bkp,
         silent=silent
     )
@@ -236,19 +240,26 @@ def parse_loss_name(name):
     else:
         projectAxes=None
 
-    m = re.search(r'_REBINNING(?:-([a-zA-Z0-9]+))*', name)
+    m = re.search(r'_REBINNINGRECO(?:-([a-zA-Z0-9]+))*', name)
     if m:
-        rebinning = '_'.join(m.group(0).split('-')[1:])
+        rebinning_reco = '_'.join(m.group(0).split('-')[1:])
     else:
-        rebinning = None
+        rebinning_reco = None
+
+    m = re.search(r'_REBINNINGGEN(?:-([a-zA-Z0-9]+))*', name)
+    if m:
+        rebinning_gen = '_'.join(m.group(0).split('-')[1:])
+    else:
+        rebinning_gen = None
 
     smoothed = '_SMOOTHED' in name
-    return tag, sample, nboot, statN, statK, firstN, syst_l, projectAxes, rebinning, smoothed
+    return tag, sample, nboot, statN, statK, firstN, syst_l, projectAxes, rebinning_reco, rebinning_gen, smoothed
 
-def loss_name(tag, sample, nboot, statN, statK, firstN, syst_l, 
-              projectAxes, rebinning, smoothed):
+def loss_name(tag, sample, skimmer,
+              nboot, statN, statK, firstN, syst_l, 
+              projectAxes, rebinning_gen, rebinning_reco, smoothed):
     if nboot < 0:
-        options = os.listdir(os.path.join(datasets.basedir, tag, sample, 'EECres4tee', 'CONSTRUCTED_LOSSES'))
+        options = os.listdir(os.path.join(datasets.basedir, tag, sample, skimmer, 'CONSTRUCTED_LOSSES'))
         options = list(filter(lambda x: x.startswith(f'{tag}_{sample}_'), options))
 
         if statN > 0:
@@ -277,11 +288,17 @@ def loss_name(tag, sample, nboot, statN, statK, firstN, syst_l,
         else:
             options = list(filter(lambda x: '_PROJECT' not in x, options))
 
-        if rebinning is not None:
-            thestr = f'_REBINNING-%s'%(rebinning.replace('_', '-'))
+        if rebinning_reco is not None:
+            thestr = f'_REBINNINGRECO-%s'%(rebinning_reco.replace('_', '-'))
             options = list(filter(lambda x: thestr in x, options))
         else:
-            options = list(filter(lambda x: '_REBINNING' not in x, options))
+            options = list(filter(lambda x: '_REBINNINGRECO' not in x, options))
+
+        if rebinning_gen is not None:
+            thestr = f'_REBINNINGGEN-%s'%(rebinning_gen.replace('_', '-'))
+            options = list(filter(lambda x: thestr in x, options))
+        else:
+            options = list(filter(lambda x: '_REBINNINGGEN' not in x, options))
 
         if smoothed:
             options = list(filter(lambda x: '_SMOOTHED' in x, options))
@@ -320,8 +337,10 @@ def loss_name(tag, sample, nboot, statN, statK, firstN, syst_l,
         name += '_PROJECT'
         for ax in projectAxes:
             name += f'-{ax}'
-    if rebinning is not None:
-        name += f'_REBINNING-%s'%(rebinning.replace('_', '-'))
+    if rebinning_reco is not None:
+        name += f'_REBINNINGRECO-%s'%(rebinning_reco.replace('_', '-'))
+    if rebinning_gen is not None:
+        name += f'_REBINNINGGEN-%s'%(rebinning_gen.replace('_', '-'))
     if smoothed:
         name += '_SMOOTHED'
     if len(syst_l) > 0:
@@ -330,14 +349,15 @@ def loss_name(tag, sample, nboot, statN, statK, firstN, syst_l,
             name += f'-{syst}'
     return name
 
-def loss_folder(tag, sample, nboot, statN, statK, firstN, syst_l, 
-                projectAxes, rebinning, smoothed):
-    name = loss_name(tag, sample, nboot, statN, statK, firstN, syst_l, 
-                     projectAxes, rebinning, smoothed)
+def loss_folder(tag, sample, skimmer, nboot, statN, statK, firstN, syst_l, 
+                projectAxes, rebinning_reco, rebinning_gen, smoothed):
+    name = loss_name(tag, sample, skimmer,
+                     nboot, statN, statK, firstN, syst_l, 
+                     projectAxes, rebinning_reco, rebinning_gen, smoothed)
 
     path = os.path.join(
         datasets.basedir, tag, sample,
-        'EECres4tee', 'CONSTRUCTED_LOSSES',
+        skimmer, 'CONSTRUCTED_LOSSES',
         name)
     return path
 
@@ -389,10 +409,11 @@ def parse_reco_name(name):
 
     return tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, projectAxes, rebinning
 
-def reco_name(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, 
+def reco_name(tag, sample, skimmer, 
+              nboot, statN, statK, firstN, objsyst, wtsyst, 
               projectAxes, rebinning, what):
     if nboot < 0:
-        options = os.listdir(os.path.join(datasets.basedir, tag, sample, 'EECres4tee', 'CONSTRUCTED_%s'%what.upper())) 
+        options = os.listdir(os.path.join(datasets.basedir, tag, sample, skimmer, 'CONSTRUCTED_%s'%what.upper())) 
         options = list(filter(lambda x: x.startswith(f'{tag}_{sample}_'), options))
 
         if statN > 0:
@@ -457,13 +478,15 @@ def reco_name(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst,
     name += f'_{objsyst}_{wtsyst}'
     return name
 
-def reco_folder(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, 
+def reco_folder(tag, sample, skimmer, 
+                nboot, statN, statK, firstN, objsyst, wtsyst, 
                 projectAxes, rebinning, what):
-    name = reco_name(tag, sample, nboot, statN, statK, firstN, objsyst, wtsyst, 
+    name = reco_name(tag, sample, skimmer, nboot, 
+                     statN, statK, firstN, objsyst, wtsyst, 
                      projectAxes, rebinning, what)
 
     path = os.path.join(
         datasets.basedir, tag, sample,
-        'EECres4tee', 'CONSTRUCTED_%s'%what.upper(),
+        skimmer, 'CONSTRUCTED_%s'%what.upper(),
         name)
     return path

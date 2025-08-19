@@ -41,11 +41,12 @@ import hist
 H = None
 for dset in dsets:
     Hnext = filenames.get_full_hist(
-        args.Runtag, dset, args.boot_per_file,
+        args.Runtag, dset, args.Skimmer,
+        args.boot_per_file,
         args.statN, args.statK, args.firstN,
         'nominal', 'nominal', args.what,
         args.reweight, args.r123type,
-        max_nboot = total_nboot,
+        max_nboot = args.max_nboot,
         from_bkp=args.oldbinning,
         silent=args.mute
     ) 
@@ -66,10 +67,10 @@ for dset in dsets:
         H = H + Hnext
 
     if type(Hnext) is hist.Hist:
-        if total_nboot > 0:
-            total_nboot = min(total_nboot, Hnext.axes['bootstrap'].size - 1)
+        if args.max_nboot > 0:
+            args.max_nboot = min(args.max_nboot, Hnext.axes['bootstrap'].size - 1)
         else:
-            total_nboot = Hnext.axes['bootstrap'].size - 1
+            args.max_nboot = Hnext.axes['bootstrap'].size - 1
 
         print("\tsum so far:", H[{'bootstrap' : 0}].sum(flow=True))
     else:

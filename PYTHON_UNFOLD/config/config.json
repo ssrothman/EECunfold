@@ -4,6 +4,18 @@
     "Ratiopad_Height" : 0.5,
     "Figure_Size" : [12, 12],
     "DPI" : 300,
+    "SystLabels" : {
+        "JER" : "Jet Energy Resolution",
+        "JES" : "Jet Energy Scale",
+        "UNCLUSTERED" : "Unclustered Energy Scale",
+        "PU" : "Pileup",
+        "PDFaS" : "PDF + $alpha_{S}$",
+        "CH" : "Track Energy Scale",
+        "TRK_EFF" : "Tracking Efficiency",
+        "ISR" : "ISR Scale",
+        "FSR" : "FSR Scale",
+        "scale" : "PS Scale"
+    },
     "KinAxes" : {
         "UFUNC<lambda>(nMatches)" : {
             "label" : "Matched"

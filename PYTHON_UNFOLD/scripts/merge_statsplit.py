@@ -85,10 +85,25 @@ if args.original_statN < args.statN:
         f"original_statN {args.original_statN} must be greater than or equal to statN {args.statN}."
     )
 
-for original_statK in range(args.statK, args.original_statN, args.statN):
+if args.statN < 0 and args.statK > 0:
+    raise ValueError(
+        "If statK is specified, statN must also be specified and greater than 0."
+    )
+
+if args.statN > 0 and args.statK < 0:
+    raise ValueError(
+        "If statN is specified, statK must also be specified and greater than 0."
+    )
+
+if args.statN < 0:
+    iterator = range(args.original_statN)
+else:
+    iterator = range(args.statK, args.original_statN, args.statN)
+
+for original_statK in iterator:
     print("Trying to get histogram for statK=%d..." % original_statK)
     Hnext = filenames.get_full_hist(
-        args.Runtag, args.Sample, args.boot_per_file,
+        args.Runtag, args.Sample, args.Skimmer, args.boot_per_file,
         args.original_statN, original_statK, args.firstN,
         args.Objsyst, args.Wtsyst, args.what,
         args.reweight, args.r123type,

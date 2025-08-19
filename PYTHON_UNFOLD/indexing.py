@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 import itertools
 import json
 import os
@@ -50,6 +51,11 @@ class BinningBlock:
                 return False
 
         return True
+
+    def copy(self):
+        result = BinningBlock()
+        result.from_dict(self.to_dict())
+        return result
 
     def to_dict(self):
         result = {
@@ -141,15 +147,18 @@ class BinningBlock:
         if type(edge) is Index:
             return edge.val
 
-        try:
-            result = self.ax_details[name]['edges'].index(edge)
-        except:
-            print()
-            print(edge)
-            print(self.ax_details[name]['edges'])
-            print()
-            raise ValueError(f"Edge {edge} not found in axis {name} edges.")
-        return result
+        edges = self.ax_details[name]['edges']
+        for i, e in enumerate(edges):
+            if e == edge:
+                return i
+            if np.abs(e-edge) < 1e-5:
+                return i
+
+        print()
+        print(edge)
+        print(self.ax_details[name]['edges'])
+        print()
+        raise ValueError(f"Edge {edge} not found in axis {name} edges.")
 
     def edges_to_indices(self, name, edges):
         if type(edges) in [int, float, Index]:
@@ -239,14 +248,17 @@ class BinningBlock:
             if accepted:
                 indices.append(i)
 
-        return np.asarray(indices)
+        return np.asarray(indices, dtype=np.int64)
 
     def get_slice_from_edges(self, data, **edges):
         return self.get_slice_from_indices(data, **{name: self.edges_to_indices(name, edges[name]) for name in edges})
 
     def get_slice_from_indices(self, data, **indices):
         indices = self.get_slice_indices(**indices)
-        return np.take(data, self.offset+indices, axis=0)
+        if type(data) is torch.Tensor:
+            return torch.take(data, torch.tensor(self.offset + indices, device=data.device))
+        else:
+            return np.take(data, self.offset+indices, axis=0)
 
     def assign_to_indices(self, data, values, **indices):
         indices = self.get_slice_indices(**indices)
@@ -369,12 +381,16 @@ class BinningBlock:
 
         return clippededges
 
-
 class Binning:
     def __init__(self):
         self.blocks = []
         self.axis_names = []
         self.Nax = 0
+
+    def copy(self):
+        result = Binning()
+        result.from_dict(self.to_dict())
+        return result
 
     '''
     Initialize from a hist.Hist object
@@ -392,12 +408,7 @@ class Binning:
     def dump_to_file(self, file):
         print("Writing binning spec to file: %s" % file)
         os.makedirs(os.path.dirname(file), exist_ok=True)
-        resultdict = {}
-        resultdict['axis_names'] = self.axis_names
-        resultdict['Nax'] = self.Nax
-        resultdict['blocks'] = []
-        for block in self.blocks:
-            resultdict['blocks'].append(block.to_dict())
+        resultdict = self.to_dict()
         with open(file, 'w') as f:
             json.dump(resultdict, f, indent=4)
 
@@ -410,6 +421,24 @@ class Binning:
         with open(file, 'r') as f:
             resultdict = json.load(f)
 
+        self.from_dict(resultdict)
+
+    '''
+    Dump to python dictionary
+    '''
+    def to_dict(self):
+        resultdict = {}
+        resultdict['axis_names'] = self.axis_names
+        resultdict['Nax'] = self.Nax
+        resultdict['blocks'] = []
+        for block in self.blocks:
+            resultdict['blocks'].append(block.to_dict())
+        return resultdict
+
+    '''
+    Initialize from python dictionary
+    '''
+    def from_dict(self, resultdict):
         self.axis_names = resultdict['axis_names']
         self.Nax = resultdict['Nax']
         self.blocks = []
@@ -417,7 +446,7 @@ class Binning:
             block = BinningBlock()
             block.from_dict(blockdata)
             self.blocks.append(block)
-
+        
     '''
     Lookup value in a specific BIN index
     '''
@@ -454,11 +483,6 @@ class Binning:
     This is a useful hack, as slicing can be slow for really big arrays
     '''
     def get_slice(self, data, **theedges):
-        in_block = np.ones(len(self.blocks), dtype=bool)
-        for i, block in enumerate(self.blocks):
-            if not block.edges_in_block(**theedges):
-                in_block[i] = False
-
         overlap_block = np.ones(len(self.blocks), dtype=bool)
         clipped_edges = []
         for i, block in enumerate(self.blocks):
@@ -471,14 +495,48 @@ class Binning:
         if np.sum(overlap_block) == 0:
             print("No blocks overlap with the specified edges.")
 
-        result = np.empty((0, *data.shape[1:]), dtype=data.dtype)
+        if type(data) is torch.Tensor:
+            result = torch.empty((0, *data.shape[1:]), dtype=data.dtype, device=data.device)
+        else:
+            result = np.empty((0, *data.shape[1:]), dtype=data.dtype)
+
         for i, block in enumerate(self.blocks):
             if overlap_block[i]:
                 theslice = block.get_slice_from_edges(data, **clipped_edges[i])
-                result = np.append(result, theslice, axis=0)
+                if type(data) is torch.Tensor:
+                    result = torch.cat((result, theslice), dim=0)
+                else:
+                    result = np.append(result, theslice, axis=0)
         return result
 
+    def get_slice_cov2d(self, data, **theedges):
+        result = self.get_slice(data.T, **theedges)
+        return self.get_slice(result.T, **theedges)
+
+    def get_continuous_slice(self, data, **theedges):
+        in_block = np.empty(len(self.blocks), dtype=bool)
+        for i, block in enumerate(self.blocks):
+            in_block[i] = block.edges_in_block(**theedges)
+
+        if np.sum(in_block) == 0:
+            raise ValueError("No block contains the specified edges.")
+        elif np.sum(in_block) > 1:
+            raise ValueError("Multiple blocks contain the specified edges.")
+
+        whichblock = np.argmax(in_block)
+        block = self.blocks[whichblock]
+        return block.get_slice_from_edges(data, **theedges), block
+
+
+    '''
+    Project out an axis from the data
+
+    Makes some pretty strong assumptions about the order of the blocks 
+    wrt the axis you are projecting out. Caution!!
+    '''
     def project_out(self, data, axis_name):
+        startsum = data.sum(axis=None)
+
         result = np.empty((0, *data.shape[1:]), dtype=data.dtype)
         newbinning = Binning()
         newbinning.axis_names = self.axis_names.copy()
@@ -500,6 +558,15 @@ class Binning:
     
             prevblock = newblock
 
+        endsum = result.sum(axis=None)
+        if not np.isclose(startsum, endsum):
+            raise ValueError(f"Projection changed the sum of the data: {startsum} -> {endsum}")
+
+        return result, newbinning
+
+    def project_out_cov2d(self, data, axis_name):
+        result, newbinning = self.project_out(data.T, axis_name)
+        result, _ = self.project_out(result.T, axis_name)
         return result, newbinning
 
     '''
@@ -517,6 +584,8 @@ class Binning:
                 rebinning_spec = json.load(f)
         elif type(rebinning_spec) is not dict:
             raise ValueError("Rebinning specification must be a dictionary or a path to a JSON file.")
+
+        startsum = data.sum(axis=None)
 
         #check consistency
         for i, specblock in enumerate(rebinning_spec['spec']):
@@ -545,7 +614,118 @@ class Binning:
         newbinning.axis_names = self.axis_names
         newbinning.Nax = self.Nax
             
+        endsum = result.sum(axis=None)
+
+        if not np.isclose(startsum, endsum):
+            raise ValueError(f"Rebinning changed the sum of the data: {startsum} -> {endsum}")
+
         return result, newbinning
+
+    def rebin_cov2d(self, data, rebinning_spec):
+        result, newbinning = self.rebin(data.T, rebinning_spec)
+        result, _ = self.rebin(result.T, rebinning_spec)
+        return result, newbinning
+
+    def get_blocks(self, axes):
+        global_edges = {name : [] for name in self.axis_names}
+        for name in self.axis_names:
+            for block in self.blocks:
+                global_edges[name] += block.ax_details[name]['edges']
+
+        for name in self.axis_names:
+            global_edges[name] = sorted(list(set(global_edges[name])))
+
+        ranges = [range(len(global_edges[name]) - 1) for name in axes]
+        import itertools
+        result = []
+        for indices in itertools.product(*ranges):
+            theslice = {}
+            for i, name in enumerate(axes):
+                theslice[name] = (global_edges[name][indices[i]], 
+                                  global_edges[name][indices[i] + 1])
+
+            globalindices = np.empty((0,), dtype=np.int64)
+            for block in self.blocks:
+                blockslice = block.clip_edges_to_block(**theslice)
+                if blockslice is not None:
+                    blockslice = {name: block.edges_to_indices(name, blockslice[name]) for name in blockslice}
+                    nextindices = block.offset+block.get_slice_indices(**blockslice)
+                    globalindices = np.append(globalindices, nextindices)
+
+            minindex = np.min(globalindices)
+            maxindex = np.max(globalindices)
+            size = maxindex - minindex + 1
+            if size == 0:
+                raise ValueError("Could not find ANY indices for slice: %s" % theslice)
+            elif size == len(globalindices):
+                result.append({
+                    'slice' : slice(minindex, maxindex + 1, 1),
+                    'edges' : theslice,
+                })
+            else:
+                result.append({
+                    'slice' : np.sort(globalindices),
+                    'edges' : theslice,
+                })
+        return result
+
+    def get_fluxes_shapes(self, data, axes):
+        axisblocks = self.get_blocks(axes)
+        if type(data) is np.ndarray:
+            shapes = np.ones(data.shape, dtype=data.dtype)
+            fluxes = np.empty(len(axisblocks), dtype=data.dtype)
+        else:
+            shapes = torch.ones(data.shape, dtype=data.dtype, device=data.device)
+            fluxes = torch.ones(len(axisblocks), dtype=data.dtype, device=data.device)
+
+        fluxbinning = Binning()
+        fluxbinning.Nax = len(axes)
+        fluxbinning.axis_names = axes
+
+        for i, block in enumerate(axisblocks):
+            indexing = block['slice']
+            if type(data) is torch.Tensor:
+                fluxes[i] *= torch.sum(data[indexing])
+            else:
+                fluxes[i] = np.sum(data[indexing])
+
+            shapes[indexing] = data[indexing]/fluxes[i]
+
+            binningblock = BinningBlock()
+            binningblock.Nax = len(axes)
+            binningblock.axis_names = axes
+            for ax in axes:
+                binningblock.extents.append(1)
+                binningblock.ax_details[ax] = {
+                    'edges' : block['edges'][ax],
+                    'extent' : 1,
+                    'minedge' : block['edges'][ax][0],
+                    'maxedge' : block['edges'][ax][1],
+                }
+            binningblock.total_size = 1
+            binningblock.offset = i
+            binningblock.calculate_strides()
+
+            fluxbinning.blocks.append(binningblock)
+
+        return fluxes, shapes, fluxbinning
+
+    def merge_fluxes_shapes(self, fluxes, shapes, fluxbinning):
+        axes = fluxbinning.axis_names
+        axisblocks = self.get_blocks(axes)
+
+        if type(fluxes) is torch.Tensor:
+            result = torch.empty(shapes.shape, dtype=shapes.dtype, device=shapes.device)
+        else:
+            result = np.empty(shapes.shape, dtype=shapes.dtype)
+
+        for i, block in enumerate(axisblocks):
+            indexing = block['slice']
+            shape = shapes[indexing]
+            flux = fluxbinning.get_slice(fluxes, **block['edges'])
+            result[indexing] = shape * flux
+
+        return result
 
     '''
     For internal use only. Not part of the public interface
@@ -563,3 +743,164 @@ class Binning:
                                        np.asarray(specblock[name][:-1]) - np.min(specblock[name]),
                                        axis=i)
         return theslice
+
+class GenRecoBinning:
+    def __init__(self):
+        self.genbinning = None
+        self.recobinning = None
+
+    def copy(self):
+        result = GenRecoBinning()
+        result.from_dict(self.to_dict())
+        return result
+
+    def setup_from_histograms(self, Hreco, Hgen):
+        self.genbinning = Binning()
+        self.genbinning.setup_from_histogram(Hgen)
+
+        self.recobinning = Binning()
+        self.recobinning.setup_from_histogram(Hreco)
+
+    def dump_to_file(self, file):
+        print("Writing binning spec to file: %s" % file)
+        os.makedirs(os.path.dirname(file), exist_ok=True)
+        resultdict = self.to_dict()
+        with open(file, 'w') as f:
+            json.dump(resultdict, f, indent=4)
+
+    def load_from_file(self, file):
+        print("Reading binning spec from file: %s" % file)
+
+        with open(file, 'r') as f:
+            resultdict = json.load(f)
+
+        self.from_dict(resultdict)
+
+    def to_dict(self):
+        gendict = self.genbinning.to_dict() 
+        recodict = self.recobinning.to_dict()
+        resultdict = {
+            'gen': gendict,
+            'reco': recodict
+        }
+        return resultdict
+
+    def from_dict(self, resultdict):
+        self.genbinning = Binning()
+        self.genbinning.from_dict(resultdict['gen'])
+
+        self.recobinning = Binning()
+        self.recobinning.from_dict(resultdict['reco'])
+
+    def get_slice(self, data, genreco, **theedges):
+        if genreco.lower().strip() == 'gen':
+            thebinning = self.genbinning
+        elif genreco.lower().strip() == 'reco':
+            thebinning = self.recobinning
+        else:
+            raise ValueError("genreco must be 'gen' or 'reco'")
+
+        return thebinning.get_slice(data, **theedges)
+
+    def get_slice_cov2d(self, data, genreco, **theedges):
+        if genreco.lower().strip() == 'gen':
+            thebinning = self.genbinning
+        elif genreco.lower().strip() == 'reco':
+            thebinning = self.recobinning
+        else:
+            raise ValueError("genreco must be 'gen' or 'reco'")
+
+        return thebinning.get_slice_cov2d(data, **theedges)
+
+    def get_slice_transfer2d(self, data, **theedges):
+        result = genbinning.get_slice(data.T, genreco='gen', **theedges)
+        result = recobinning.get_slice(result.T, genreco='reco', **theedges)
+        return result
+
+    def project_out(self, data, genreco, axis_name):
+        if genreco.lower().strip() == 'gen':
+            thebinning = self.genbinning
+        elif genreco.lower().strip() == 'reco':
+            thebinning = self.recobinning
+        else:
+            raise ValueError("genreco must be 'gen' or 'reco'")
+
+        return thebinning.project_out(data, axis_name)
+
+    def project_out_cov2d(self, data, genreco, axis_name):
+        if genreco.lower().strip() == 'gen':
+            thebinning = self.genbinning
+        elif genreco.lower().strip() == 'reco':
+            thebinning = self.recobinning
+        else:
+            raise ValueError("genreco must be 'gen' or 'reco'")
+
+        return thebinning.project_out_cov2d(data, axis_name)
+
+    def project_out_transfer2d(self, data, axis_name):
+        if type(data) in [list, tuple]:
+            recodata = data[0]
+            gendata = data[1]
+
+            recodata, newbinning_reco = self.project_out(recodata.T, 'reco', axis_name)
+            gendata, newbinning_gen = self.project_out(gendata.T, 'gen', axis_name)
+
+            result = [recodata.T, gendata.T]
+        else:
+            result, newbinning_gen = self.genbinning.project_out(data.T, axis_name)
+            result, newbinning_reco = self.recobinning.project_out(result.T, axis_name)
+
+        newbinning = GenRecoBinning()
+        newbinning.genbinning = newbinning_gen
+        newbinning.recobinning = newbinning_reco
+
+        return result, newbinning
+
+    def rebin(self, data, genreco, rebinning_spec):
+        if genreco.lower().strip() == 'gen':
+            thebinning = self.genbinning
+        elif genreco.lower().strip() == 'reco':
+            thebinning = self.recobinning
+        else:
+            raise ValueError("genreco must be 'gen' or 'reco'")
+        
+        if rebinning_spec is None:
+            return data, thebinning.copy()
+
+        return thebinning.rebin(data, rebinning_spec)
+
+    def rebin_cov2d(self, data, genreco, rebinning_spec):
+        if genreco.lower().strip() == 'gen':
+            thebinning = self.genbinning
+        elif genreco.lower().strip() == 'reco':
+            thebinning = self.recobinning
+        else:
+            raise ValueError("genreco must be 'gen' or 'reco'")
+
+        if rebinning_spec is None:
+            return data, thebinning
+
+        return thebinning.rebin_cov2d(data, rebinning_spec)
+
+    def rebin_transfer2d(self, data, rebinning_reco, rebinning_gen):
+        if type(data) in [list, tuple]:
+            if len(data) != 2:
+                raise ValueError("Data must be a tuple or list of length 2 containing reco and gen data, or else an np.ndarray transfer matrix")
+
+            recodata = data[0]
+            gendata = data[1]
+
+            recodata, newbinning_reco = self.rebin(recodata.T, 'reco', rebinning_reco)
+            gendata, newbinning_gen = self.rebin(gendata.T, 'gen', rebinning_gen)
+
+            result = [recodata.T, gendata.T]
+
+        else:
+            result, newbinning_gen = self.rebin(data.T, 'gen', rebinning_gen)
+            result, newbinning_reco = self.rebin(result.T, 'reco', rebinning_reco) 
+
+        newbinning = GenRecoBinning()
+        newbinning.genbinning = newbinning_gen
+        newbinning.recobinning = newbinning_reco
+
+        return result, newbinning

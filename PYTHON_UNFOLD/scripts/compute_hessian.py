@@ -1,8 +1,10 @@
 import argparse
+import fasteigenpy as eigen
 
-parser = argparse.ArgumentParser(description='Run the minimizer for EEC reconstruction')
+parser = argparse.ArgumentParser()
 parser.add_argument('Rundir', type=str)
 
+parser.add_argument('--fluxes_and_shapes', type=str, nargs='+', default=None)
 parser.add_argument('--device', type=str, default=None)
 parser.add_argument('--force', action='store_true')
 
@@ -21,8 +23,14 @@ import datasets
 import minimizer
 import numpy as np
 import ioutil
+import torch
+torch.autograd.set_detect_anomaly(True)
 
-hessianpath = os.path.join(args.Rundir, 'minimization_result', 'HESSIAN.npy')
+if args.fluxes_and_shapes:
+    hessianpath = os.path.join(args.Rundir, 'minimization_result', 'HESSIAN_FLUXES_SHAPES-%s.npy') % '-'.join(args.fluxes_and_shapes)
+else:
+    hessianpath = os.path.join(args.Rundir, 'minimization_result', 'HESSIAN.npy')
+
 if os.path.exists(hessianpath) and not args.force:
     print(f"File {hessianpath} already exists. Use --force to overwrite.")
     import sys
@@ -50,6 +58,7 @@ hess = minimizer.compute_hessian(LOSS, reco, recoerr,
                                  x=res.x,
                                  device=args.device,
                                  frozen_mask = configdict['frozen_mask'],
-                                 frozen_vals = configdict['frozen_vals'])
+                                 frozen_vals = configdict['frozen_vals'],
+                                 fluxes_and_shapes = args.fluxes_and_shapes)
 
 ioutil.wrapped_write_np(hessianpath, hess)

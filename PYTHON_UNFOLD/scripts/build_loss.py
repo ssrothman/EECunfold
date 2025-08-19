@@ -3,6 +3,7 @@ import argparse
 parser = argparse.ArgumentParser(description='Build EEC loss functions')
 parser.add_argument('Tag', type=str)
 parser.add_argument('Sample', type=str)
+parser.add_argument('Skimmer', type=str,)
 
 parser.add_argument('--nboot', type=int, default=-1)
 
@@ -11,16 +12,27 @@ parser.add_argument('--statK', type=int, default=-1)
 parser.add_argument('--firstN', type=int, default=-1)
 
 parser.add_argument('--two_sided', type=str, nargs='*',
-                    default=['scale', 'isosf', 'idsf', 'triggersf',
-                             'PU', 'PDF', 'aS', 'PDFaS', 
-                             'ISR', 'FSR',
-                             'CH', 'JES', 'JER', 'UNCLUSTERED'])
+                    default=['scale',
+                             'isosf', 
+                             'idsf', 
+                             'triggersf',
+                             'PU', 
+                             'prefire',
+                             #'PDF', 
+                             #'aS', 
+                             'PDFaS', 
+                             'ISR', 
+                             'FSR',
+                             'CH', 
+                             'JES', 
+                             'JER', 
+                             'UNCLUSTERED'])
 parser.add_argument('--one_sided', type=str, nargs='*',
                     default=['TRK_EFF'])
 
 parser.add_argument('--projectAxes', type=str, nargs='*', default=None)
 
-parser.add_argument('--boot_per_file', type=int, default=-1, nargs='+')
+parser.add_argument('--boot_per_file', type=int, default=-1)
 parser.add_argument('--reweight', type=str, default=None)
 parser.add_argument('--r123type', type=str, default=None)
 
@@ -28,7 +40,8 @@ parser.add_argument('--force', action='store_true')
 
 parser.add_argument('--oldbinning', action='store_true',)
 
-parser.add_argument('--rebinning', type=str, default=None)
+parser.add_argument('--rebinning_gen', type=str, default=None)
+parser.add_argument('--rebinning_reco', type=str, default=None)
 
 parser.add_argument('--which_objsysts', type=str, nargs='*',
                     default=['JER', 'JES', 'UNCLUSTERED', 'CH', 'TRK_EFF'],
@@ -57,7 +70,8 @@ hists = {
 for what in hists.keys():
     print("Loading %s %s"%(what, 'nominal'))
     hists[what]['nominal'] = filenames.get_full_hist(
-            args.Tag, args.Sample, args.boot_per_file,
+            args.Tag, args.Sample, args.Skimmer,
+            args.boot_per_file,
             args.statN, args.statK, args.firstN, 
             'nominal', 'nominal', what,
             args.reweight, args.r123type,
@@ -93,10 +107,12 @@ else:
 
 import filenames
 outpath = filenames.loss_folder(
-    args.Tag, args.Sample, actual_nboot,
+    args.Tag, args.Sample, args.Skimmer,
+    actual_nboot,
     args.statN, args.statK, args.firstN,
     args.two_sided + args.one_sided, 
-    args.projectAxes, args.rebinning,
+    args.projectAxes,
+    args.rebinning_gen, args.rebinning_reco,
     False)
 
 if args.oldbinning:
@@ -108,41 +124,46 @@ if os.path.exists(outpath) and not args.force:
     sys.exit(0)
 os.makedirs(outpath, exist_ok=True)
 
-binning = indexing.Binning()
-binning.setup_from_histogram(hists['reco']['nominal'][{'bootstrap' : 0}])
+basebinning = indexing.GenRecoBinning()
+basebinning.setup_from_histograms(
+    hists['reco']['nominal'][{'bootstrap' : 0}],    
+    hists['gen']['nominal'][{'bootstrap' : 0}],
+)
 
-MCreco = hists['reco']['nominal'][{'bootstrap' : 0}].values(flow=True).ravel()
 MCgen = hists['gen']['nominal'][{'bootstrap' : 0}].values(flow=True).ravel()
-MCdenom = np.where(MCreco==0, 1, MCreco)
-MCx0 = MCgen / MCdenom
-MCx0[MCreco == 0] = 1
+MCreco = hists['reco']['nominal'][{'bootstrap' : 0}].values(flow=True).ravel()
 
-if args.rebinning is not None:
-    print("Rebinning reco")
-    rebinning_path = os.path.join('rebinnings', args.rebinning + '.json')
-    MCx0, rebinning = binning.rebin(
-            MCx0, rebinning_path
-    )
-
-    thebinning = rebinning
+if args.rebinning_reco is not None:
+    rebinning_path_reco = os.path.join('rebinnings', args.rebinning_reco + '.json')
 else:
-    rebinning_path = None
-    thebinning = binning
+    rebinning_path_reco = None
+
+if args.rebinning_gen is not None:
+    rebinning_path_gen = os.path.join('rebinnings', args.rebinning_gen + '.json')
+else:
+    rebinning_path_gen = None
+
+print("Nominal reco, gen shapes", MCreco.shape, MCgen.shape)
+(MCreco, MCgen), binning = basebinning.rebin_transfer2d(
+    [MCreco, MCgen],
+    rebinning_path_reco,
+    rebinning_path_gen
+)
+print("Rebinned reco, gen shapes", MCreco.shape, MCgen.shape)
 
 if args.projectAxes is not None:
-    axes_to_project = [ax for ax in binning.axis_names if ax not in args.projectAxes]
+    axes_to_project = [ax for ax in binning.genbinning.axis_names if ax not in args.projectAxes]
     for ax in axes_to_project:
         print("projecting out", ax)
-        MCx0, thebinning = thebinning.project_out(
-            MCx0.T, ax,
+        (MCreco, MCgen), binning = binning.project_out_transfer2d(
+            [MCreco, MCgen], ax,
         )
-        MCx0 = MCx0.T
-        print("\tprojected shape:", MCx0.shape)
+        print("\tprojected reco, gen shapes:", MCreco.shape, MCgen.shape)
 else:
     axes_to_project = None
 
-thebinning.dump_to_file(os.path.join(outpath, 'Binning.json'))
-ioutil.wrapped_write_np(os.path.join(outpath, 'MCx0.npy'), MCx0.ravel())
+binning.dump_to_file(os.path.join(outpath, 'Binning.json'))
+ioutil.wrapped_write_np(os.path.join(outpath, 'MCgen.npy'), MCgen.ravel())
 
 wtsysts_to_load = []
 objsysts_to_load = []
@@ -159,7 +180,8 @@ for what in hists.keys():
         for updn, updnname in zip(UPDN, UPDNnames):
             print("Loading %s %s"%(what, wtsyst+updn))
             hists[what][wtsyst + updnname] = filenames.get_full_hist(
-                args.Tag, args.Sample, args.boot_per_file,
+                args.Tag, args.Sample, args.Skimmer,
+                args.boot_per_file,
                 args.statN, args.statK, args.firstN,
                 'nominal', wtsyst + updn, what,
                 args.reweight, args.r123type,
@@ -174,7 +196,8 @@ for what in hists.keys():
         for updn, updnname in zip(UPDN, UPDNnames):
             print("Loading %s %s"%(what, objsyst+updn))
             hists[what][objsyst + updnname] = filenames.get_full_hist(
-                args.Tag, args.Sample, args.boot_per_file,
+                args.Tag, args.Sample, args.Skimmer,
+                args.boot_per_file,
                 args.statN, args.statK, args.firstN,
                 objsyst + updn, 'nominal', what,
                 args.reweight, args.r123type,
@@ -191,10 +214,12 @@ import pickle
 
 print("SETUP LOSS")
 LOSS = minimizer.setup_loss(hists, 
+                            thebinning = binning,
                             two_sided_systs=args.two_sided,
                             one_sided_systs=args.one_sided,
-                            basebinning = binning,
-                            rebinning_path = rebinning_path,
+                            basebinning = basebinning,
+                            rebinning_path_reco = rebinning_path_reco,
+                            rebinning_path_gen = rebinning_path_gen,
                             axes_to_project=axes_to_project)
 
 LOSS.write_to_disk(outpath)

@@ -1,9 +1,3 @@
-try:
-    import fasteigenpy as eigen
-except ImportError:
-    print("fasteigenpy not found, using eigenpy instead. This may be slower.")
-    import eigenpy as eigen
-
 import numpy as np
 import unc
 from scipy.optimize import minimize
@@ -12,13 +6,16 @@ import torchmin
 import torch
 import loss
 from scipy.stats import multivariate_normal
+import indexing
 
 #cut = {'pt' : slice(None,None,sum)}
 #tcut = {'pt_reco' : slice(None,None,sum), 'pt_gen' : slice(None,None,sum)}
 
 torch.set_default_dtype(torch.float64)
 
-def get_arrs(histdict, syst, iboot, basebinning, rebinning_path, axes_to_project):
+def get_arrs(histdict, syst, iboot, basebinning, 
+             rebinning_path_reco, rebinning_path_gen, axes_to_project):
+
     the_cut = {}
     the_tcut = {}
     if iboot is not None:
@@ -52,56 +49,46 @@ def get_arrs(histdict, syst, iboot, basebinning, rebinning_path, axes_to_project
         recoshape = reco.shape[0] 
         genshape = gen.shape[0]
 
-    if transfer is not None:
-        transfer = transfer.reshape((recoshape, genshape))
+    transfer = transfer.reshape((recoshape, genshape))
 
-    if rebinning_path is not None:
-        import indexing
-        print("Rebinning...")
+    print("Rebinning...")
 
-        if transfer is not None:
-            transfer, _ = basebinning.rebin(transfer, rebinning_path)
-            transfer, _ = basebinning.rebin(transfer.T, rebinning_path)
-            transfer = transfer.T
+    reco, _ = basebinning.rebin(reco.T, 'reco', rebinning_path_reco)
+    recoBkg, _ = basebinning.rebin(recoBkg.T, 'reco', rebinning_path_reco)
+    gen, _ = basebinning.rebin(gen.T, 'gen', rebinning_path_gen)
+    genBkg, _ = basebinning.rebin(genBkg.T, 'gen', rebinning_path_gen)
+    reco = reco.T
+    recoBkg = recoBkg.T
+    gen = gen.T
+    genBkg = genBkg.T
 
-        reco, _ = basebinning.rebin(reco.T, rebinning_path)
-        recoBkg, _ = basebinning.rebin(recoBkg.T, rebinning_path)
-        gen, _ = basebinning.rebin(gen.T, rebinning_path)
-        genBkg, basebinning = basebinning.rebin(genBkg.T, rebinning_path)
-        reco = reco.T
-        recoBkg = recoBkg.T
-        gen = gen.T
-        genBkg = genBkg.T
+    transfer, basebinning = basebinning.rebin_transfer2d(
+        transfer, rebinning_path_reco, rebinning_path_gen
+    )
 
-        print("after rebinning, shapes are")
-        print("\treco: ", reco.shape)
-        print("\trecoBkg: ", recoBkg.shape)
-        print("\tgen: ", gen.shape)
-        print("\tgenBkg: ", genBkg.shape)
-        if transfer is not None:
-            print("\ttransfer: ", transfer.shape)
+    print("after rebinning, shapes are")
+    print("\treco: ", reco.shape)
+    print("\trecoBkg: ", recoBkg.shape)
+    print("\tgen: ", gen.shape)
+    print("\tgenBkg: ", genBkg.shape)
+    print("\ttransfer: ", transfer.shape)
     
     if axes_to_project is not None:
-        import indexing
         for ax in axes_to_project:
             print("projecting out", ax)
 
-            if transfer is not None:
-                transfer = basebinning.project_out(transfer.T, ax)[0]
-                transfer = basebinning.project_out(transfer.T, ax)[0]
+            reco = basebinning.project_out(reco.T, 'reco', ax)[0].T
+            recoBkg = basebinning.project_out(recoBkg.T, 'reco', ax)[0].T
+            gen = basebinning.project_out(gen.T, 'gen', ax)[0].T
+            genBkg = basebinning.project_out(genBkg.T, 'gen', ax)[0].T
 
-            reco = basebinning.project_out(reco.T, ax)[0].T
-            recoBkg = basebinning.project_out(recoBkg.T, ax)[0].T
-            gen = basebinning.project_out(gen.T, ax)[0].T
-            genBkg, basebinning = basebinning.project_out(genBkg.T, ax)
-            genBkg = genBkg.T
+            transfer, basebinning = basebinning.project_out_transfer2d(transfer, ax)
 
-    if transfer is not None:
-        tdenom = gen - genBkg
-        tdenom = np.where(tdenom==0, 1, tdenom)
-        if iboot is None:
-            tdenom = tdenom[0]
-        transfer = transfer/tdenom[None, :]
+    tdenom = gen - genBkg
+    tdenom = np.where(tdenom==0, 1, tdenom)
+    if iboot is None:
+        tdenom = tdenom[0]
+    transfer = transfer/tdenom[None, :]
 
     Gdenom = np.where(gen==0, 1, gen)
     gamma = genBkg / Gdenom
@@ -109,19 +96,37 @@ def get_arrs(histdict, syst, iboot, basebinning, rebinning_path, axes_to_project
     Rdenom = np.where(reco-recoBkg==0, 1, reco-recoBkg)
     rho = recoBkg / Rdenom
 
+    #check
+    if iboot == 0:
+        purefwd = transfer @ (gen - genBkg)
+        print("Checking transfer: ", np.allclose(purefwd, reco - recoBkg))
+
     return reco, gen, rho, gamma, transfer
 
 def setup_loss(histdict, 
+               thebinning,
                Nboot=-1,
                two_sided_systs=[],
                one_sided_systs=[], 
                basebinning=None,
-               rebinning_path=None,
+               rebinning_path_reco=None,
+               rebinning_path_gen=None,
                axes_to_project=None):
     #nominal
     reco0, gen0, rho0, gamma0, transfer0 = get_arrs(histdict, 'nominal', 0,
-                                                    basebinning, rebinning_path,
+                                                    basebinning, 
+                                                    rebinning_path_reco,
+                                                    rebinning_path_gen,
                                                     axes_to_project)
+
+    print("RECO0", reco0.sum(), reco0.shape)
+    print("\t", reco0)
+    print("GEN0", gen0.sum(), gen0.shape)
+    print("\t", gen0)
+    print("GenBkg0", (gen0*gamma0).sum(), gamma0.shape)
+    print("\t", gamma0)
+    print("TRANSFER0", transfer0.sum(), transfer0.shape)
+    print("\t", transfer0)
 
     rhoVariations = []
     gammaVariations = []
@@ -136,7 +141,9 @@ def setup_loss(histdict,
 
     print("Building stat templates...")
     _, _, rhoboot, gammaboot, _ = get_arrs(histdict, 'nominal', None,
-                                           basebinning, rebinning_path,
+                                           basebinning, 
+                                           rebinning_path_reco,
+                                           rebinning_path_gen,
                                            axes_to_project)
     for iboot in tqdm(range(1, Nboot+1)):
         rhoVariations.append((rhoboot[iboot] - rho0)/Nboot)
@@ -145,11 +152,18 @@ def setup_loss(histdict,
     #syst variations
     print("Buiding two-sided systs...")
     for syst in tqdm(two_sided_systs):
+        print()
+        print("FOR SYST", syst)
+        print()
         _, _, rho_up, gamma_up, transfer_up = get_arrs(histdict, '%sUp'%syst, 0,
-                                                       basebinning, rebinning_path,
+                                                       basebinning, 
+                                                       rebinning_path_reco,
+                                                       rebinning_path_gen,
                                                        axes_to_project)
         _, _, rho_dn, gamma_dn, transfer_dn = get_arrs(histdict, '%sDown'%syst, 0,
-                                                       basebinning, rebinning_path,
+                                                       basebinning, 
+                                                       rebinning_path_reco,
+                                                       rebinning_path_gen,
                                                        axes_to_project)
         rhoVariations.append(0.5*(rho_up - rho_dn))
         gammaVariations.append(0.5*(gamma_up - gamma_dn))
@@ -160,7 +174,9 @@ def setup_loss(histdict,
     print("Building one-sided systs...")
     for syst in tqdm(one_sided_systs):
         _, _, rho_up, gamma_up, transfer_up = get_arrs(histdict, syst, 0,
-                                                       basebinning, rebinning_path,
+                                                       basebinning, 
+                                                       rebinning_path_reco,
+                                                       rebinning_path_gen,
                                                        axes_to_project)
         rhoVariations.append(rho_up - rho0)
         gammaVariations.append(gamma_up - gamma0)
@@ -193,6 +209,8 @@ def setup_loss(histdict,
                transferVarIndices,
                gamma0, gammaVariations, 
                rho0, rhoVariations,
+               gen0, np.asarray(reco0.sum()),
+               binning = thebinning,
                namedNuisances = namedNuisances)
 
     return LOSS
@@ -200,7 +218,14 @@ def setup_loss(histdict,
 def compute_hessian(LOSS, reco, recoErr, run2d, x,
                     device='cuda',
                     frozen_mask=None,
-                    frozen_vals=None):
+                    frozen_vals=None,
+                    fluxes_and_shapes=None):
+
+    if fluxes_and_shapes is not None:
+        fluxes, shapes, fluxbinning = LOSS.binning.genbinning.get_fluxes_shapes(
+            x[:LOSS.nBeta]*LOSS.genBaseline*reco.sum()/LOSS.baselineRecoFlux,
+            fluxes_and_shapes
+        )
 
     if type(device) is str:
         device = torch.device(device)
@@ -215,7 +240,7 @@ def compute_hessian(LOSS, reco, recoErr, run2d, x,
     else:
         LOSS.set_1d()
 
-    LOSS.set_rescaled(False)
+    LOSS.set_rescaled(fluxes_and_shapes is not None)
 
     if type(x) is not torch.Tensor:
         x = torch.from_numpy(x)
@@ -245,9 +270,64 @@ def compute_hessian(LOSS, reco, recoErr, run2d, x,
         newx[frozen_mask] = frozen_vals
         x = newx
 
-    theloss = LOSS.one_parameter_loss(reco, recoErr, None, None)
+    if fluxes_and_shapes is None: 
+        theloss = LOSS.one_parameter_loss(reco, recoErr, None, None)
+        print("X sum:", x.sum().item())
+    else:
+        fluxes = torch.from_numpy(fluxes).to(device)
+        shapes = torch.from_numpy(shapes).to(device)
 
-    return torch.autograd.functional.hessian(theloss, x, vectorize=False).cpu().detach().numpy()
+        if LOSS.nTheta == 0:
+            theloss = lambda a, b: LOSS.loss_from_fluxes_shapes(
+                    a, b, fluxbinning, 
+                    torch.tensor([], device=a.device),
+                    reco, recoErr
+            )
+            x = (fluxes, shapes)
+        else:
+            theloss = lambda a, b, c: LOSS.loss_from_fluxes_shapes(
+                    a, b, fluxbinning, 
+                    c,
+                    reco, recoErr
+            )
+            x = (fluxes, shapes, x[LOSS.nBeta:])
+
+        print("Fluxes sum:", fluxes.sum().item())
+        print("Shapes sum:", shapes.sum().item())
+    
+    result = torch.autograd.functional.hessian(theloss, x, vectorize=False)
+
+    if fluxes_and_shapes is None:
+        H = result.cpu().detach().numpy()
+
+        return 0.5 * (H + H.T)
+    else:
+        if LOSS.nTheta > 0:
+            NS = LOSS.nBeta
+            NF = fluxes.shape[0] 
+            NSF = NS+NF
+            NH = NSF+LOSS.nTheta
+            H = np.zeros((NH, NH), dtype=np.float64)
+            H[:NS, :NS]        = result[1][1].cpu().detach().numpy()
+            H[NS:NSF, :NS]     = result[0][1].cpu().detach().numpy()
+            H[NSF:, :NS]       = result[2][1].cpu().detach().numpy()
+            H[:NS, NS:NSF]     = result[1][0].cpu().detach().numpy()
+            H[NS:NSF, NS:NSF]  = result[0][0].cpu().detach().numpy()
+            H[NSF:, NS:NSF]    = result[2][0].cpu().detach().numpy()
+            H[:NS, NSF:]       = result[1][2].cpu().detach().numpy()
+            H[NS:NSF, NSF:]    = result[0][2].cpu().detach().numpy()
+            H[NSF:, NSF:]      = result[2][2].cpu().detach().numpy()
+        else:
+            HS = LOSS.nBeta
+            NF = fluxes.shape[0]
+            NSF = HS + NF
+            H = np.zeros((NSF, NSF), dtype=np.float64)
+            H[:HS, :HS]        = result[1][1].cpu().detach().numpy()
+            H[HS:NSF, :HS]     = result[0][1].cpu().detach().numpy()
+            H[:HS, HS:NSF]     = result[1][0].cpu().detach().numpy()
+            H[HS:NSF, HS:NSF]  = result[0][0].cpu().detach().numpy()
+
+        return 0.5 * (H + H.T)
 
 def setup_minimizer_from_run(rundir):
     import ioutil
@@ -260,11 +340,13 @@ def setup_minimizer_from_run(rundir):
 
     lossname = os.path.basename(os.path.dirname(rundir))
 
+    skimmer = os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(rundir)))))
+
     import datasets
     import filenames
-    losstag, losssample, _, _, _, _, _, _, _, _, = filenames.parse_loss_name(lossname)
+    losstag, losssample, _, _, _, _, _, _, _, _, _ = filenames.parse_loss_name(lossname)
     losspath = os.path.join(datasets.basedir, losstag, losssample, 
-                            'EECres4tee', 'CONSTRUCTED_LOSSES', 
+                            skimmer, 'CONSTRUCTED_LOSSES', 
                             lossname)
 
     import loss

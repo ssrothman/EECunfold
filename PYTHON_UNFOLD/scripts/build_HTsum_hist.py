@@ -53,7 +53,8 @@ for dset, xsec in zip(dsets, xsecs):
         samplewt = samplewt * samplewt
 
     Hnext = filenames.get_full_hist(
-        args.Runtag, dset, args.boot_per_file,
+        args.Runtag, dset, args.Skimmer,
+        args.boot_per_file,
         args.statN, args.statK, args.firstN,
         args.Objsyst, args.Wtsyst, args.what,
         args.reweight, args.r123type,
@@ -75,6 +76,8 @@ for dset, xsec in zip(dsets, xsecs):
             elif H.axes['bootstrap'].size > Hnext.axes['bootstrap'].size:
                 H = H[{'bootstrap' : slice(None, Hnext.axes['bootstrap'].size)}]
 
+        if H.shape != Hnext.shape:
+            raise ValueError("Histograms have different shapes: %s vs %s" % (H.shape, Hnext.shape))
         H = H + Hnext
 
     if type(Hnext) is hist.Hist:

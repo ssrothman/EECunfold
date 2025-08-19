@@ -207,7 +207,11 @@ def inverse_from_eigenspectrum(solver,
     else:
         return inverse, reconstructed
 
-def get_chi2(vals1, vals2, cov1, cov2, binning=None, cut=None):
+def get_chi2(vals1, vals2, cov1, cov2, binning=None, cut=None, normalize=False):
+    if normalize:
+        vals1, cov1 = normalize_distribution(vals1, cov1)
+        vals2, cov2 = normalize_distribution(vals2, cov2)
+
     covdiff = cov1 + cov2
     diff = vals1 - vals2
 
@@ -216,14 +220,22 @@ def get_chi2(vals1, vals2, cov1, cov2, binning=None, cut=None):
         covdiff = binning.get_slice(covdiff.T, **cut)
         covdiff = binning.get_slice(covdiff.T, **cut)
 
-    _, invcov, _ = inverse_and_eigenspectrum(
-            covdiff,
-            clip_lowest_N=0,
-            force_positive=True,
-            return_sqrt=False,
-            wrt_corr=True
-    )
+    #_, invcov, _ = inverse_and_eigenspectrum(
+    #        covdiff,
+    #        clip_lowest_N=0,
+    #        force_positive=True,
+    #        return_sqrt=False,
+    #        wrt_corr=True
+    #)
+    err = np.sqrt(np.diag(covdiff))
+    err[err == 0] = 1
+    cdiff = np.diag(1/err) @ covdiff @ np.diag(1/err)
+    codcdiff = eigen.CompleteOrthogonalDecomposition(cdiff) 
+    invc = codcdiff.pseudoInverse()
+    invcov = np.diag(1/err) @ invc @ np.diag(1/err)
+
     chi2 = diff @ invcov @ diff
+    print("CHI2",chi2)
 
     return chi2, len(diff)
 
@@ -321,3 +333,153 @@ def quotient_distribution(vals1, cov1, vals2, cov2, cov12):
         result_cov -= term3 + term3.T
 
     return result_vals, result_cov
+
+def flux_and_shape_covariance(data, covyy, covty, binning, axes):
+    blocks = binning.get_blocks(axes)
+    fluxes, shapes, fluxbinning = binning.get_fluxes_shapes(data, axes)
+
+    Nflux = len(blocks)
+
+    covshapes = np.zeros(covyy.shape, dtype=covyy.dtype)
+    covflux = np.zeros((Nflux, Nflux), dtype=covyy.dtype)
+    covfluxshape = np.zeros((Nflux, covyy.shape[0]), dtype=covyy.dtype)
+    
+    if covty is not None:
+        covtshapes = np.zeros((covty.shape[0], covyy.shape[0]), dtype=covyy.dtype)
+        covtflux = np.zeros((covty.shape[0], Nflux), dtype=covyy.dtype)
+
+    #mapping from shape to flux
+    fluxindex = np.zeros(covyy.shape[0], dtype=np.int32)
+    for i, block in enumerate(blocks):
+        fluxindex[block['slice']] = i
+
+    #covflux
+    for a, blockA in enumerate(blocks):
+        sliceA = blockA['slice']
+        for b, blockB in enumerate(blocks):
+            sliceB = blockB['slice']
+
+            covflux[a, b] = np.sum(covyy[sliceA, :][:, sliceB])
+
+    #covfluxshape
+    for a, blockA in enumerate(blocks):
+        sliceA = blockA['slice']
+
+        for b, blockB in enumerate(blocks):
+            sliceB = blockB['slice']
+            
+            covfluxshape[a, sliceB] += np.sum(covyy[sliceA, sliceB], axis=0) / fluxes[b]
+
+            covfluxshape[a, sliceB] -= (shapes[sliceB]/fluxes[b])  * np.sum(covyy[sliceA, :][:, sliceB], axis=None)
+
+    #covshape
+    for a, blockA in enumerate(blocks):
+        sliceA = blockA['slice']
+
+        for b, blockB in enumerate(blocks):
+            sliceB = blockB['slice']
+
+            covshapes[sliceA, :][:, sliceB] += covyy[sliceA, :][:, sliceB] / (fluxes[a] * fluxes[b])
+
+            covshapes[sliceA, :][:, sliceB] += (np.outer(shapes[sliceA], shapes[sliceB]) / (fluxes[a] * fluxes[b])) * np.sum(covyy[sliceA, :][:, sliceB], axis=None)
+
+            covshapes[sliceA, :][:, sliceB] -= np.outer(shapes[sliceA]/(fluxes[a] * fluxes[b]), np.sum(covyy[sliceA, :][:, sliceB], axis=0))
+            covshapes[sliceA, :][:, sliceB] -= np.outer(np.sum(covyy[sliceA, :][:, sliceB], axis=1), shapes[sliceB]/(fluxes[a] * fluxes[b]))
+
+    if covty is not None:
+        #covty
+        for a, blockA in enumerate(blocks):
+            sliceA = blockA['slice']
+
+            covtflux[:, a] = np.sum(covty[:, sliceA], axis=1)
+
+        #covtshapes
+        for a, blockA in enumerate(blocks):
+            sliceA = blockA['slice']
+
+            covtshapes[:, sliceA] += covty[:, sliceA] / fluxes[a]
+            covtshapes[:, sliceA] -= np.outer(np.sum(covty[:, sliceA], axis=1),
+                                              shapes[sliceA] / fluxes[a])
+    else:
+        covtflux = None
+        covtshapes = None
+
+    return fluxes, shapes, covflux, covshapes, covfluxshape, covtflux, covtshapes, fluxbinning
+
+def compute_flux(vals, cov, binning, ptslice, Rslice, 
+                 normalize=True, jacobian=True):
+
+    flux, block = binning.get_continuous_slice(vals, pt=ptslice, R=Rslice)
+    covflux = binning.get_slice_cov2d(cov, pt=ptslice, R=Rslice)
+
+    r_edges = np.asarray(block.ax_details['r']['edges'])
+    c_edges = np.asarray(block.ax_details['c']['edges'])
+
+    if normalize:
+        flux, covflux = normalize_distribution(flux, covflux)
+
+    if jacobian:
+        jac = 0.5 * (r_edges[1:]**2 - r_edges[:-1]**2)[:, None] \
+                * (c_edges[1:] - c_edges[:-1])[None, :]
+        jac = jac.ravel()
+
+        flux = flux/jac
+        covflux = covflux/np.outer(jac, jac)
+
+    return flux, covflux, r_edges, c_edges
+
+def angular_averaged_flux(vals, cov, binning, ptslice, Rslice,
+                           normalize=True, jacobian=True):
+
+    flux, covflux, r_edges, c_edges = compute_flux(
+        vals, cov, binning, ptslice, Rslice,
+        normalize=normalize, jacobian=jacobian
+    )
+
+    flux = flux.reshape((len(r_edges)-1, len(c_edges)-1))
+    covflux = covflux.reshape((*flux.shape, *flux.shape))
+
+    fluxsum = flux.sum(axis=1)
+    covsum = covflux.sum(axis=(1,3))
+
+    N = flux.shape[1]
+    fluxavg = fluxsum / N
+    covavg = covsum / (N * N)
+
+    return fluxavg, covavg, r_edges, c_edges
+
+def radial_summed_flux(vals, cov, binning, ptslice, Rslice, 
+                       normalize=True, jacobian=True):
+
+    flux, covflux, r_edges, c_edges = compute_flux(
+        vals, cov, binning, ptslice, Rslice,
+        normalize=normalize, jacobian=jacobian
+    )
+
+    flux = flux.reshape((len(r_edges)-1, len(c_edges)-1))
+    covflux = covflux.reshape((*flux.shape, *flux.shape))
+
+    fluxsum = flux.sum(axis=0)
+    covsum = covflux.sum(axis=(0,2))
+
+    return fluxsum, covsum, r_edges, c_edges
+
+def radial_slice_flux(vals, cov, binning, ptslice, Rslice, rbin,
+                      normalize=True, jacobian=True):
+    flux, covflux, r_edges, c_edges = compute_flux(
+        vals, cov, binning, ptslice, Rslice,
+        normalize=normalize, jacobian=jacobian
+    )
+
+    flux = flux.reshape((len(r_edges)-1, len(c_edges)-1))
+    covflux = covflux.reshape((*flux.shape, *flux.shape))
+
+    fluxsum = flux[rbin,:]
+    covsum = covflux[rbin, :, rbin, :]
+
+    print(fluxsum.shape)
+    print(covsum.shape)
+
+    fluxsum, covsum = normalize_distribution(fluxsum, covsum)
+
+    return fluxsum, covsum, r_edges, c_edges

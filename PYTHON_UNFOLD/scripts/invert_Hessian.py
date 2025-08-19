@@ -7,34 +7,41 @@ parser.add_argument('Rundir', type=str)
 parser.add_argument('--force', action='store_true')
 
 parser.add_argument('--clipLowestN', type=int, default=0)
-parser.add_argument('--forcePositive', action='store_true')
+parser.add_argument('--dontForcePositive', action='store_true')
 
-parser.add_argument('--clip_wrt_corr', action='store_true')
+parser.add_argument('--dont_clip_wrt_corr', action='store_true')
+
+parser.add_argument('--fluxes_and_shapes', type=str, nargs='+', default=None)
 
 args = parser.parse_args()
 
 import os
 
-hessianpath = os.path.join(args.Rundir, 'minimization_result', 'HESSIAN.npy')
-
-if args.clip_wrt_corr:
-    eigvals_path = os.path.join(args.Rundir, 'minimization_result', 'HESS_CORR_EIGVALS.npy')
-    eigvecs_path = os.path.join(args.Rundir, 'minimization_result', 'HESS_CORR_EIGVECS.npy')
+if args.fluxes_and_shapes:
+    extrastr = '_FLUXES_SHAPES-'+'-'.join(args.fluxes_and_shapes)
 else:
-    eigvals_path = os.path.join(args.Rundir, 'minimization_result', 'HESS_EIGVALS.npy')
-    eigvecs_path = os.path.join(args.Rundir, 'minimization_result', 'HESS_EIGVECS.npy')
+    extrastr = ''
+
+hessianpath = os.path.join(args.Rundir, 'minimization_result', 'HESSIAN%s.npy' % extrastr)
+
+if not args.dont_clip_wrt_corr:
+    eigvals_path = os.path.join(args.Rundir, 'minimization_result', 'HESS%s_CORR_EIGVALS.npy'   % extrastr)
+    eigvecs_path = os.path.join(args.Rundir, 'minimization_result', 'HESS%s_CORR_EIGVECS.npy' % extrastr)
+else:
+    eigvals_path = os.path.join(args.Rundir, 'minimization_result', 'HESS%s_EIGVALS.npy' % extrastr)
+    eigvecs_path = os.path.join(args.Rundir, 'minimization_result', 'HESS%s_EIGVECS.npy' % extrastr)
 
 clipped_name = 'clip%d' % args.clipLowestN
-if args.forcePositive:
+if not args.dontForcePositive:
     clipped_name += '_forcePos'
-if args.clip_wrt_corr:
+if not args.dont_clip_wrt_corr:
     clipped_name += '_clipCorr'
 
-inverse_path = os.path.join(args.Rundir, 'minimization_result', 'HESS_EIGINV_%s.npy' % clipped_name)
-reconstructed_path = os.path.join(args.Rundir, 'minimization_result', 'HESS_EIG_%s.npy' % clipped_name)
+inverse_path = os.path.join(args.Rundir, 'minimization_result', 'HESS%s_EIGINV_%s.npy' % (extrastr, clipped_name))
+reconstructed_path = os.path.join(args.Rundir, 'minimization_result', 'HESS%s_EIG_%s.npy' % (extrastr, clipped_name))
 
-Linv_path = os.path.join(args.Rundir, 'minimization_result', 'HESS_EIGINV_L_%s.npy' % clipped_name)
-Lreco_path = os.path.join(args.Rundir, 'minimization_result', 'HESS_EIG_L_%s.npy' % clipped_name)
+Linv_path = os.path.join(args.Rundir, 'minimization_result', 'HESS%s_EIGINV_L_%s.npy' % (extrastr, clipped_name))
+Lreco_path = os.path.join(args.Rundir, 'minimization_result', 'HESS%s_EIG_L_%s.npy' % (extrastr, clipped_name))
 
 if os.path.exists(eigvals_path) and os.path.exists(eigvecs_path) and os.path.exists(inverse_path) and os.path.exists(reconstructed_path) and not args.force:
     print(f"Destination {inverse_path} already exists. Use --force to overwrite.")
@@ -47,7 +54,7 @@ import numpy as np
 H = ioutil.wrapped_read_np(hessianpath)
 H = 0.5 * (H + H.T)  # Ensure symmetry
 
-if args.clip_wrt_corr:
+if not args.dont_clip_wrt_corr:
     err = np.sqrt(np.diag(H))
     err[err==0] = 1
     inverr = 1 / err
@@ -71,11 +78,12 @@ ioutil.wrapped_write_np(eigvecs_path, solver.eigenvectors())
 print("Inverting...")
 import statutil
 inverse, reconstructed, Linv, Lreco = statutil.inverse_from_eigenspectrum(
-    solver, clip_lowest_N=args.clipLowestN, force_positive=args.forcePositive,
+    solver, clip_lowest_N=args.clipLowestN, 
+    force_positive=not args.dontForcePositive,
     return_sqrt=True
 )
 
-if args.clip_wrt_corr:
+if not args.dont_clip_wrt_corr:
     inverse = np.diag(inverr) @ inverse @ np.diag(inverr)
     reconstructed = np.diag(err) @ reconstructed @ np.diag(err)
 

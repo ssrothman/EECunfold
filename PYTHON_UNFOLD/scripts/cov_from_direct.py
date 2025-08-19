@@ -3,6 +3,7 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('Tag', type=str)
 parser.add_argument('Sample', type=str)
+parser.add_argument('Skimmer', type=str)
 parser.add_argument('--statN', type=int, default=-1)
 parser.add_argument('--statK', type=int, default=-1)
 parser.add_argument('--firstN', type=int, default=-1)
@@ -33,7 +34,8 @@ import os
 import ioutil
 
 recofolder = filenames.reco_folder(
-    args.Tag, args.Sample, args.nboot,
+    args.Tag, args.Sample, args.Skimmer,
+    args.nboot,
     args.statN, args.statK, args.firstN, 
     args.objsyst, args.wtsyst, 
     args.projectAxes, args.rebinning,
@@ -50,7 +52,8 @@ if os.path.exists(output_path) and not args.force:
     sys.exit(0)
 
 cov = filenames.get_full_hist(
-    args.Tag, args.Sample, args.nboot, 
+    args.Tag, args.Sample, args.Skimmer,
+    args.nboot, 
     args.statN, args.statK, args.firstN,
     args.objsyst, args.wtsyst, 'directcov_%s'%args.what,
     args.reweight, args.r123type, 
@@ -63,7 +66,8 @@ cov = cov.reshape(halfsize, halfsize)
 
 if args.rebinning is not None or args.projectAxes is not None:
     Hreco = filenames.get_full_hist(
-        args.Tag, args.Sample, -1, 
+        args.Tag, args.Sample, args.Skimmer,
+        -1, 
         args.statN, args.statK, args.firstN,
         args.objsyst, args.wtsyst, args.what,
         args.reweight, args.r123type, 
@@ -75,17 +79,30 @@ if args.rebinning is not None or args.projectAxes is not None:
     if args.rebinning is not None:
         print("Rebinning cov")
         print("\tstarting", cov.shape)
-        cov, _ = binning.rebin(cov.T, os.path.join('rebinnings', args.rebinning + '.json'))
-        print("\thalfway", cov.shape)
-        cov, binning = binning.rebin(cov.T, os.path.join('rebinnings', args.rebinning + '.json'))
+        prebinning_sum = cov.sum(axis=None)
+        cov, binning = binning.rebin_cov2d(
+            cov, os.path.join('rebinnings', args.rebinning + '.json')
+        )
+        postbinning_sum = cov.sum(axis=None)
         print("\tending", cov.shape)
+        if not np.isclose(prebinning_sum, postbinning_sum):
+            raise ValueError(
+                "Rebinning changed the sum of the covariance matrix: "
+                f"{prebinning_sum} -> {postbinning_sum}"
+            )
     if args.projectAxes is not None:
         axes_to_project = [ax for ax in binning.axis_names if ax not in args.projectAxes]
+        preproject_sum = cov.sum(axis=None)
         for ax in axes_to_project:
             print("projecting out", ax)
-            cov, _ = binning.project_out(cov.T, ax)
-            cov, binning = binning.project_out(cov.T, ax)
+            cov, binning = binning.project_out_cov2d(cov, ax)
             print("\tprojected shape:", cov.shape)
+        postproject_sum = cov.sum(axis=None)
+        if not np.isclose(preproject_sum, postproject_sum):
+            raise ValueError(
+                "Projecting out axes changed the sum of the covariance matrix: "
+                f"{preproject_sum} -> {postproject_sum}"
+            )
 
 ioutil.wrapped_write_np(output_path, cov)
 
