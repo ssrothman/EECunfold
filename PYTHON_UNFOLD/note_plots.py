@@ -137,7 +137,6 @@ ptbins = [50, 88, 150, 254, 408, np.inf]
 Rbins = [0.4, 0.5]
 
 ptslices = [
-    (-np.inf, 50), 
     (50, 88), 
     (88, 150), 
     (150, 254), 
@@ -146,12 +145,11 @@ ptslices = [
 ]
 Rslices = [(0.4,0.5)] * 6
 labels = [
-    '$30 < p_T \\text{ GeV} < 50$',
-    '$50 < p_T \\text{ GeV} < 88$',
-    '$88 < p_T \\text{ GeV} < 150$',
-    '$150 < p_T \\text{ GeV} < 254$',
-    '$254 < p_T \\text{ GeV} < 408$',
-    '$408 < p_T \\text{ GeV}$',
+    '$50 < p_T < 88$ GeV',
+    '$88 < p_T < 150$ GeV',
+    '$150 < p_T < 254$ GeV',
+    '$254 < p_T < 408$ GeV',
+    '$p_T > 408$ GeV',
 ]
 
 cbins = []

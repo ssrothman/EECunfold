@@ -495,7 +495,7 @@ def compare_flux_projection(vals_l, covs_l, label_l,
         if extratext is not None:
             axtext += extratext.strip() + '\n'
         if allSamePt:
-            axtext += '$%g < p_t \\text{ [GeV]} < %g$\n' % (
+            axtext += '$%g < p_t < %g$ GeV\n' % (
                 ptslice_l[0][0], ptslice_l[0][1]
             )
         if allSameR:
@@ -596,7 +596,7 @@ def compare_flux_projection(vals_l, covs_l, label_l,
             if text is None:
                 text = ''
 
-            text = '%g < pt [GeV] < %g\n%g < R < %g\n' % (
+            text = '%g < p_t < %g GeV \n%g < R < %g\n' % (
                 ptslice_l[0][0], ptslice_l[0][1],
                 Rslice_l[0][0], Rslice_l[0][1]
             ) + text
@@ -647,11 +647,11 @@ def plot_teedipole_2d(
             hep.cms.label(ax=ax, data=isData, label=config['Approval_Text'], pad=0.05)
 
         if ptslice[0] == -np.inf:
-            labeltext = '$30 < p_T \\text{ [GeV]} < %g$\n' % ptslice[1]
+            labeltext = '$30 < p_T < %g$ GeV\n' % ptslice[1]
         elif ptslice[1] == np.inf:
-            labeltext = '$%g < p_T \\text{ [GeV]}$\n' % ptslice[0]
+            labeltext = '$p_T > %g$ GeV\n' % ptslice[0]
         else:
-            labeltext = '$%g < p_T \\text{ [GeV]} < %g$\n' % (ptslice[0], ptslice[1])
+            labeltext = '$%g < p_T < %g$ GeV\n' % (ptslice[0], ptslice[1])
         if Rslice[0] == -np.inf:
             labeltext += '$0 < R < %g$\n' % Rslice[1]
         elif Rslice[1] == np.inf:
@@ -1093,6 +1093,8 @@ def plot_uncertainty_contributions(LOSS, x, covx,
                         xerr=0.5, fmt='o', color='black',
                         label='Total', rasterized=True)
 
+
+
         ax.legend(bbox_to_anchor=(1., 1), loc='upper left',
                   frameon=True, fontsize=16, ncol=1)
 
@@ -1115,6 +1117,7 @@ def plot_uncertainty_contributions(LOSS, x, covx,
 
         if logy:
             ax.set_yscale('log')
+            ax.set_ylim(5e-4, 2e-1)
         else:
             ax.set_ylim(0, None)
 
